@@ -65,10 +65,10 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    function log(emoji, message, data = null) {
+    function log(message, data = null) {
         const timestamp = new Date().toLocaleTimeString();
         const logEl = document.querySelector('#toolbox-log');
-        const text = `[${timestamp}] ${emoji} ${message}`;
+        const text = `[${timestamp}] ${message}`;
         console.log(text, data || '');
         if (logEl) {
             logEl.innerHTML += `<div>${text}</div>`;
@@ -107,11 +107,11 @@
             const { searchQuery, limit, maxPages, price, maxToAdd } = config.products;
             const companyId = COMPANY_ID;
             
-            log('🚀', `Поиск товаров: "${searchQuery}"`);
-            log('🏢', `Company ID: ${companyId}`);
+            log(`Поиск товаров: "${searchQuery}"`);
+            log(`Company ID: ${companyId}`);
             
             if (!companyId) {
-                log('❌', 'Company ID не найден!');
+                log('Company ID не найден!');
                 this.isRunning = false;
                 return;
             }
@@ -141,31 +141,31 @@
                 };
                 
                 // Загрузка страниц
-                log('📄', `Загрузка страницы ${pageNum}...`);
+                log(`Загрузка страницы ${pageNum}...`);
                 let data = await fetchPage();
                 allItems = allItems.concat(data.items || []);
                 lastId = data.last_id;
                 
                 while (lastId && pageNum < maxPages) {
                     pageNum++;
-                    log('📄', `Страница ${pageNum}/${maxPages}...`);
+                    log(`Страница ${pageNum}/${maxPages}...`);
                     data = await fetchPage(lastId);
                     allItems = allItems.concat(data.items || []);
                     lastId = data.last_id;
                     await sleep(300);
                 }
                 
-                log('✅', `Загружено: ${allItems.length} товаров`);
+                log(`Загружено: ${allItems.length} товаров`);
                 
                 // Фильтрация доступных
                 const availableItems = allItems.filter(item => 
                     !item.attributes?.find(attr => attr.key === "12085" && attr.value === "deny")
                 );
                 
-                log('🎯', `Доступно: ${availableItems.length} из ${allItems.length}`);
+                log(`Доступно: ${availableItems.length} из ${allItems.length}`);
                 
                 if (availableItems.length === 0) {
-                    log('⚠️', 'Нет доступных товаров для добавления');
+                    log('Нет доступных товаров для добавления');
                     this.isRunning = false;
                     return;
                 }
@@ -178,7 +178,7 @@
                     selectedItems.push(availableItems[Math.floor(i * step)]);
                 }
                 
-                log('📦', `Добавление ${selectedItems.length} товаров...`);
+                log(`Добавление ${selectedItems.length} товаров...`);
                 
                 let addedCount = 0;
                 let errorCount = 0;
@@ -207,25 +207,25 @@
                         });
                         
                         if (response.ok) {
-                            log('✅', `Добавлен: ${item.name.substring(0, 40)}... [${randomArticle}]`);
+                            log(`Добавлен: ${item.name.substring(0, 40)}... [${randomArticle}]`);
                             addedCount++;
                         } else {
-                            log('❌', `Ошибка: ${item.name.substring(0, 30)}...`);
+                            log(`Ошибка: ${item.name.substring(0, 30)}...`);
                             errorCount++;
                         }
                     } catch (e) {
-                        log('❌', `Ошибка: ${e.message}`);
+                        log(`Ошибка: ${e.message}`);
                         errorCount++;
                     }
                     
                     await sleep(500);
                 }
                 
-                log('🏁', `ГОТОВО! Добавлено: ${addedCount}, Ошибок: ${errorCount}`);
+                log(`ГОТОВО! Добавлено: ${addedCount}, Ошибок: ${errorCount}`);
                 showToast(`Добавлено ${addedCount} товаров!`, 'success');
                 
             } catch (error) {
-                log('❌', `Ошибка: ${error.message}`);
+                log(`Ошибка: ${error.message}`);
                 showToast('Ошибка выполнения', 'error');
             }
             
@@ -257,15 +257,15 @@
             }
             
             this.isRunning = true;
-            log('🚀', 'Создание склада Express');
-            log('🏢', `Company ID: ${companyId}`);
-            log('📍', `Адрес: ${warehouseAddress}`);
+            log('Создание склада Express');
+            log(`Company ID: ${companyId}`);
+            log(`Адрес: ${warehouseAddress}`);
             
             const delay = (ms) => speedMode === 'fast' ? sleep(500) : sleep(ms);
             
             try {
                 // ШАГ 1: Создание черновика
-                log('📝', 'Шаг 1: Создание черновика склада...');
+                log('Шаг 1: Создание черновика склада...');
                 
                 const draftResponse = await fetch('https://seller.ozon.ru/api/v1/warehouse/create-draft', {
                     method: 'POST',
@@ -278,12 +278,12 @@
                 
                 const draftData = await draftResponse.json();
                 this.state.warehouseDraftId = draftData.warehouse_id;
-                log('✅', `Черновик создан: ${this.state.warehouseDraftId}`);
+                log(`Черновик создан: ${this.state.warehouseDraftId}`);
                 
                 await delay(2000);
                 
                 // ШАГ 2: Геокодирование адреса
-                log('🌍', 'Шаг 2: Геокодирование адреса...');
+                log('Шаг 2: Геокодирование адреса...');
                 
                 const geoResponse = await fetch('https://seller.ozon.ru/api/v1/geo/suggest', {
                     method: 'POST',
@@ -302,12 +302,12 @@
                 
                 const geo = geoData.items[0];
                 this.state.coordinates = { lat: geo.lat, lng: geo.lng };
-                log('✅', `Координаты: ${geo.lat}, ${geo.lng}`);
+                log(`Координаты: ${geo.lat}, ${geo.lng}`);
                 
                 await delay(1000);
                 
                 // ШАГ 3: Обновление черновика
-                log('📝', 'Шаг 3: Заполнение данных склада...');
+                log('Шаг 3: Заполнение данных склада...');
                 
                 // Генерация названия из адреса если не указано
                 const cityMatch = warehouseAddress.match(/г\.?\s*([^,]+)/i) || 
@@ -332,12 +332,12 @@
                     })
                 });
                 
-                log('✅', `Название: ${autoName}`);
+                log(`Название: ${autoName}`);
                 
                 await delay(2000);
                 
                 // ШАГ 4: Создание метода доставки
-                log('🚗', 'Шаг 4: Создание метода доставки...');
+                log('Шаг 4: Создание метода доставки...');
                 
                 const methodResponse = await fetch('https://seller.ozon.ru/api/site/seller-delivery-zones/express/method/create', {
                     method: 'POST',
@@ -351,12 +351,12 @@
                 
                 const methodData = await methodResponse.json();
                 this.state.deliveryMethodId = methodData.result?.method_id || methodData.method_id;
-                log('✅', `Метод доставки: ${this.state.deliveryMethodId}`);
+                log(`Метод доставки: ${this.state.deliveryMethodId}`);
                 
                 await delay(2000);
                 
                 // ШАГ 5: Расчет и создание зоны доставки
-                log('🗺️', 'Шаг 5: Расчет зоны доставки...');
+                log('Шаг 5: Расчет зоны доставки...');
                 
                 const radiusKm = (deliveryTimeMinutes / 60) * courierSpeedKmh;
                 const points = 32;
@@ -373,12 +373,12 @@
                 }
                 polygon.push(polygon[0]); // Замыкаем полигон
                 
-                log('✅', `Радиус доставки: ${radiusKm.toFixed(1)} км`);
+                log(`Радиус доставки: ${radiusKm.toFixed(1)} км`);
                 
                 await delay(1000);
                 
                 // ШАГ 6: Создание зоны
-                log('📍', 'Шаг 6: Создание зоны доставки...');
+                log('Шаг 6: Создание зоны доставки...');
                 
                 const areaResponse = await fetch('https://seller.ozon.ru/api/site/seller-delivery-zones/express/area/create', {
                     method: 'POST',
@@ -392,12 +392,12 @@
                 
                 const areaData = await areaResponse.json();
                 this.state.areaId = areaData.result?.area_id || areaData.area_id;
-                log('✅', `Зона создана: ${this.state.areaId}`);
+                log(`Зона создана: ${this.state.areaId}`);
                 
                 await delay(2000);
                 
                 // ШАГ 7: Активация склада
-                log('🔓', 'Шаг 7: Активация склада...');
+                log('Шаг 7: Активация склада...');
                 
                 await fetch('https://seller.ozon.ru/api/v1/warehouse/activate', {
                     method: 'POST',
@@ -408,16 +408,16 @@
                     })
                 });
                 
-                log('🎉', '═══════════════════════════════════════');
-                log('🎉', 'СКЛАД УСПЕШНО СОЗДАН!');
-                log('🎉', `ID склада: ${this.state.warehouseDraftId}`);
-                log('🎉', `Радиус: ${radiusKm.toFixed(1)} км`);
-                log('🎉', '═══════════════════════════════════════');
+                log('═══════════════════════════════════════');
+                log('СКЛАД УСПЕШНО СОЗДАН!');
+                log(`ID склада: ${this.state.warehouseDraftId}`);
+                log(`Радиус: ${radiusKm.toFixed(1)} км`);
+                log('═══════════════════════════════════════');
                 
                 showToast('Склад успешно создан!', 'success');
                 
             } catch (error) {
-                log('❌', `Ошибка: ${error.message}`);
+                log(`Ошибка: ${error.message}`);
                 showToast(`Ошибка: ${error.message}`, 'error');
             }
             
@@ -620,16 +620,16 @@
         const widget = document.createElement('div');
         widget.id = 'ozon-toolbox';
         widget.innerHTML = `
-            <button class="toggle-btn" title="Ozon Toolbox">🛠️</button>
+            <button class="toggle-btn" title="Ozon Toolbox"></button>
             <div class="panel">
                 <div class="header">
-                    <span>🛠️ Ozon Toolbox</span>
+                    <span> Ozon Toolbox</span>
                     <span class="company-badge">ID: ${COMPANY_ID || '—'}</span>
                 </div>
                 
                 <div class="tabs">
-                    <button class="tab active" data-tab="products">📦 Товары</button>
-                    <button class="tab" data-tab="warehouse">🏭 Склад</button>
+                    <button class="tab active" data-tab="products"> Товары</button>
+                    <button class="tab" data-tab="warehouse"> Склад</button>
                 </div>
                 
                 <!-- ВКЛАДКА: ТОВАРЫ -->
@@ -661,7 +661,7 @@
                         </div>
                     </div>
                     
-                    <button class="btn btn-primary" id="btn-run-products">🚀 Найти и добавить товары</button>
+                    <button class="btn btn-primary" id="btn-run-products"> Найти и добавить товары</button>
                     
                     <div class="log-area" id="toolbox-log"></div>
                 </div>
@@ -704,12 +704,12 @@
                     <div class="field">
                         <label>Режим</label>
                         <select id="cfg-speedMode">
-                            <option value="human" ${config.warehouse.speedMode === 'human' ? 'selected' : ''}>🐢 Человечный (надёжный)</option>
-                            <option value="fast" ${config.warehouse.speedMode === 'fast' ? 'selected' : ''}>🚀 Быстрый (для тестов)</option>
+                            <option value="human" ${config.warehouse.speedMode === 'human' ? 'selected' : ''}> Человечный (надёжный)</option>
+                            <option value="fast" ${config.warehouse.speedMode === 'fast' ? 'selected' : ''}> Быстрый (для тестов)</option>
                         </select>
                     </div>
                     
-                    <button class="btn btn-success" id="btn-run-warehouse">🏭 Создать склад Express</button>
+                    <button class="btn btn-success" id="btn-run-warehouse"> Создать склад Express</button>
                     
                     <div class="log-area" id="toolbox-log-wh"></div>
                 </div>
@@ -791,8 +791,8 @@
         setConfig: saveConfig
     };
 
-    console.log('🛠️ Ozon Toolbox v2.0 загружен');
-    console.log(`🏢 Company ID: ${COMPANY_ID}`);
+    console.log(' Ozon Toolbox v2.0 загружен');
+    console.log(` Company ID: ${COMPANY_ID}`);
     console.log('📖 Команды: OzonToolbox.ProductsModule.run(config), OzonToolbox.WarehouseModule.run(config)');
 
 })();
