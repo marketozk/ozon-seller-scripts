@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Ozon Seller Toolbox
 // @namespace    http://tampermonkey.net/
-// @version      2.1
-// @description  Полный набор инструментов: поиск товаров + создание складов
+// @version      3.0
+// @description  Полный набор: товары + склады + перехватчик (логи в консоль)
 // @author       You
 // @match        https://seller.ozon.ru/*
 // @grant        none
@@ -11,6 +11,79 @@
 
 (function() {
     'use strict';
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // ПЕРЕХВАТЧИК ЗАПРОСОВ (запускается сразу при загрузке)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    let capturedRequests = JSON.parse(localStorage.getItem('_interceptedRequests') || '[]');
+    let isRecording = JSON.parse(localStorage.getItem('_interceptorRecording') ?? 'true');
+
+    function saveRequests() {
+        localStorage.setItem('_interceptedRequests', JSON.stringify(capturedRequests));
+    }
+
+    function tryParseJSON(str) {
+        if (!str) return null;
+        try { return JSON.parse(str); } catch { return str; }
+    }
+
+    const originalFetch = window.fetch;
+    window.fetch = async function(...args) {
+        const [url, options = {}] = args;
+        if (!isRecording || !url.includes('/api/')) {
+            return originalFetch.apply(this, args);
+        }
+
+        const request = {
+            timestamp: new Date().toISOString(),
+            url: url,
+            method: options.method || 'GET',
+            body: options.body ? tryParseJSON(options.body) : null
+        };
+
+        const response = await originalFetch.apply(this, args);
+        const clone = response.clone();
+
+        try { request.response = await clone.json(); } catch { request.response = null; }
+        request.status = response.status;
+        capturedRequests.push(request);
+        saveRequests();
+        return response;
+    };
+
+    const originalXHROpen = XMLHttpRequest.prototype.open;
+    const originalXHRSend = XMLHttpRequest.prototype.send;
+
+    XMLHttpRequest.prototype.open = function(method, url) {
+        this._interceptedMethod = method;
+        this._interceptedUrl = url;
+        return originalXHROpen.apply(this, arguments);
+    };
+
+    XMLHttpRequest.prototype.send = function(body) {
+        const xhr = this;
+        if (!isRecording || !xhr._interceptedUrl.includes('/api/')) {
+            return originalXHRSend.apply(this, arguments);
+        }
+
+        const request = {
+            timestamp: new Date().toISOString(),
+            type: 'XHR',
+            url: xhr._interceptedUrl,
+            method: xhr._interceptedMethod,
+            body: tryParseJSON(body)
+        };
+
+        xhr.addEventListener('load', function() {
+            try { request.response = JSON.parse(xhr.responseText); } catch { request.response = null; }
+            request.status = xhr.status;
+            capturedRequests.push(request);
+            saveRequests();
+        });
+
+        return originalXHRSend.apply(this, arguments);
+    };
 
     // ═══════════════════════════════════════════════════════════════════════════
     // API ENDPOINTS
@@ -90,18 +163,9 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    function log(message, logId = 'toolbox-log') {
+    function log(message) {
         const timestamp = new Date().toLocaleTimeString();
-        const text = `[${timestamp}] ${message}`;
-        console.log(text);
-        
-        const logEl = document.querySelector(`#${logId}`);
-        if (logEl) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            logEl.appendChild(div);
-            logEl.scrollTop = logEl.scrollHeight;
-        }
+        console.log(`[${timestamp}] ${message}`);
     }
 
     function showToast(message, type = 'info') {
@@ -144,7 +208,7 @@
         
         stop() {
             this.shouldStop = true;
-            log('Остановка...', 'toolbox-log');
+            log('Остановка...');
         },
         
         async run(config) {
@@ -171,8 +235,8 @@
             this.shouldStop = false;
             updateButtons();
             
-            log(`Поиск: "${searchQuery}"`, 'toolbox-log');
-            log(`Company ID: ${COMPANY_ID}`, 'toolbox-log');
+            log(`Поиск: "${searchQuery}"`);
+            log(`Company ID: ${COMPANY_ID}`);
             
             try {
                 let allItems = [];
@@ -180,7 +244,7 @@
                 let pageNum = 1;
                 
                 while (pageNum <= maxPages && !this.shouldStop) {
-                    log(`Страница ${pageNum}/${maxPages}...`, 'toolbox-log');
+                    log(`Страница ${pageNum}/${maxPages}...`);
                     
                     const requestBody = { name: searchQuery.trim(), limit: limit.toString() };
                     if (lastId) requestBody.last_id = lastId;
@@ -204,20 +268,20 @@
                 }
                 
                 if (this.shouldStop) {
-                    log('Остановлено пользователем', 'toolbox-log');
+                    log('Остановлено пользователем');
                     return;
                 }
                 
-                log(`Найдено: ${allItems.length} товаров`, 'toolbox-log');
+                log(`Найдено: ${allItems.length} товаров`);
                 
                 const availableItems = allItems.filter(item => 
                     !item.attributes?.find(attr => attr.key === "12085" && attr.value === "deny")
                 );
                 
-                log(`Доступно: ${availableItems.length}`, 'toolbox-log');
+                log(`Доступно: ${availableItems.length}`);
                 
                 if (availableItems.length === 0) {
-                    log('Нет доступных товаров', 'toolbox-log');
+                    log('Нет доступных товаров');
                     return;
                 }
                 
@@ -228,14 +292,14 @@
                     selectedItems.push(availableItems[Math.floor(i * step)]);
                 }
                 
-                log(`Добавление ${selectedItems.length} товаров...`, 'toolbox-log');
+                log(`Добавление ${selectedItems.length} товаров...`);
                 
                 let addedCount = 0;
                 let errorCount = 0;
                 
                 for (const item of selectedItems) {
                     if (this.shouldStop) {
-                        log('Остановлено пользователем', 'toolbox-log');
+                        log('Остановлено пользователем');
                         break;
                     }
                     
@@ -259,21 +323,21 @@
                             })
                         });
                         
-                        log(`+ ${item.name.substring(0, 35)}... [${randomArticle}]`, 'toolbox-log');
+                        log(`+ ${item.name.substring(0, 35)}... [${randomArticle}]`);
                         addedCount++;
                     } catch (e) {
-                        log(`x Ошибка: ${e.message.substring(0, 50)}`, 'toolbox-log');
+                        log(`x Ошибка: ${e.message.substring(0, 50)}`);
                         errorCount++;
                     }
                     
                     await sleep(500);
                 }
                 
-                log(`--- ИТОГО: +${addedCount} / ошибок: ${errorCount}`, 'toolbox-log');
+                log(`--- ИТОГО: +${addedCount} / ошибок: ${errorCount}`);
                 showToast(`Добавлено ${addedCount} товаров`, addedCount > 0 ? 'success' : 'error');
                 
             } catch (error) {
-                log(`Ошибка: ${error.message}`, 'toolbox-log');
+                log(`Ошибка: ${error.message}`);
                 showToast('Ошибка выполнения', 'error');
             } finally {
                 this.isRunning = false;
@@ -294,7 +358,7 @@
         
         stop() {
             this.shouldStop = true;
-            log('Остановка...', 'toolbox-log-wh');
+            log('Остановка...');
         },
         
         async run(config) {
@@ -325,7 +389,7 @@
             this.state = {};
             updateButtons();
             
-            const logWh = (msg) => log(msg, 'toolbox-log-wh');
+            const logWh = (msg) => log(msg);
             const delay = (ms) => speedMode === 'fast' ? sleep(500) : sleep(ms);
             
             logWh('Создание склада Express');
@@ -679,21 +743,11 @@
             
             #ozon-toolbox .btn-danger:hover { transform: translateY(-1px); }
             
-            #ozon-toolbox .log-area {
-                background: #1e1e1e;
-                color: #0f0;
-                font-family: 'Consolas', 'Monaco', monospace;
-                font-size: 11px;
-                padding: 10px;
-                border-radius: 6px;
-                max-height: 150px;
-                overflow-y: auto;
-                margin-top: 10px;
-            }
-            
-            #ozon-toolbox .log-area div {
-                margin-bottom: 2px;
-                word-break: break-all;
+            #ozon-toolbox .stat-row {
+                display: flex;
+                justify-content: space-between;
+                padding: 8px 0;
+                border-bottom: 1px solid #f0f0f0;
             }
             
             #ozon-toolbox .hint {
@@ -717,6 +771,7 @@
                 <div class="tabs">
                     <button class="tab active" data-tab="products">Товары</button>
                     <button class="tab" data-tab="warehouse">Склад</button>
+                    <button class="tab" data-tab="interceptor">API</button>
                 </div>
                 
                 <!-- ТОВАРЫ -->
@@ -750,8 +805,7 @@
                     
                     <button class="btn btn-primary" id="btn-run-products">Найти и добавить</button>
                     <button class="btn btn-danger" id="btn-stop-products" style="display:none">СТОП</button>
-                    
-                    <div class="log-area" id="toolbox-log"></div>
+                    <div class="hint" style="margin-top:8px">Логи в консоли браузера (F12)</div>
                 </div>
                 
                 <!-- СКЛАД -->
@@ -792,15 +846,36 @@
                     <div class="field">
                         <label>Режим</label>
                         <select id="cfg-speedMode">
-                            <option value="human" ${config.warehouse.speedMode === 'human' ? 'selected' : ''}>Надёжный</option>
+                            <option value="human" ${config.warehouse.speedMode === 'human' ? 'selected' : ''}>Надежный</option>
                             <option value="fast" ${config.warehouse.speedMode === 'fast' ? 'selected' : ''}>Быстрый</option>
                         </select>
                     </div>
                     
                     <button class="btn btn-success" id="btn-run-warehouse">Создать склад</button>
                     <button class="btn btn-danger" id="btn-stop-warehouse" style="display:none">СТОП</button>
+                    <div class="hint" style="margin-top:8px">Логи в консоли браузера (F12)</div>
+                </div>
+                
+                <!-- ПЕРЕХВАТЧИК -->
+                <div class="tab-content" id="tab-interceptor">
+                    <div class="stat-row">
+                        <span>Статус</span>
+                        <span id="rec-status" style="color:${isRecording ? '#28a745' : '#dc3545'}">${isRecording ? 'Запись' : 'Пауза'}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span>Запросов</span>
+                        <span id="req-count">${capturedRequests.length}</span>
+                    </div>
                     
-                    <div class="log-area" id="toolbox-log-wh"></div>
+                    <div class="row" style="margin-top:12px">
+                        <button class="btn btn-primary" id="btn-toggle-rec" style="flex:1">${isRecording ? 'Пауза' : 'Запись'}</button>
+                        <button class="btn btn-secondary" id="btn-show-log" style="flex:1;background:#f0f0f0;color:#333">Консоль</button>
+                    </div>
+                    <div class="row">
+                        <button class="btn btn-secondary" id="btn-download" style="flex:1;background:#dcfce7;color:#16a34a">Скачать</button>
+                        <button class="btn btn-secondary" id="btn-copy" style="flex:1;background:#f0f0f0;color:#333">Копировать</button>
+                    </div>
+                    <button class="btn btn-danger" id="btn-clear">Очистить</button>
                 </div>
             </div>
         `;
@@ -839,7 +914,6 @@
                 }
             };
             saveConfig(cfg);
-            widget.querySelector('#toolbox-log').innerHTML = '';
             ProductsModule.run(cfg);
         });
         
@@ -863,13 +937,63 @@
                 }
             };
             saveConfig(cfg);
-            widget.querySelector('#toolbox-log-wh').innerHTML = '';
             WarehouseModule.run(cfg);
         });
         
         widget.querySelector('#btn-stop-warehouse').addEventListener('click', () => {
             WarehouseModule.stop();
         });
+
+        // Кнопки перехватчика
+        widget.querySelector('#btn-toggle-rec').addEventListener('click', () => {
+            isRecording = !isRecording;
+            localStorage.setItem('_interceptorRecording', JSON.stringify(isRecording));
+            widget.querySelector('#rec-status').textContent = isRecording ? 'Запись' : 'Пауза';
+            widget.querySelector('#rec-status').style.color = isRecording ? '#28a745' : '#dc3545';
+            widget.querySelector('#btn-toggle-rec').textContent = isRecording ? 'Пауза' : 'Запись';
+            showToast(isRecording ? 'Запись включена' : 'Запись на паузе');
+        });
+        
+        widget.querySelector('#btn-show-log').addEventListener('click', () => {
+            console.clear();
+            console.log('%cПерехваченные запросы', 'font-size:16px;font-weight:bold');
+            console.table(capturedRequests.map(r => ({
+                time: r.timestamp?.split('T')[1]?.split('.')[0] || '',
+                method: r.method,
+                url: r.url?.replace('https://seller.ozon.ru', '') || '',
+                status: r.status
+            })));
+            showToast('Открой консоль (F12)');
+        });
+        
+        widget.querySelector('#btn-download').addEventListener('click', () => {
+            const blob = new Blob([JSON.stringify(capturedRequests, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `ozon_requests_${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+            showToast(`Скачано ${capturedRequests.length} запросов`);
+        });
+        
+        widget.querySelector('#btn-copy').addEventListener('click', () => {
+            navigator.clipboard.writeText(JSON.stringify(capturedRequests, null, 2));
+            showToast(`${capturedRequests.length} запросов скопировано`);
+        });
+        
+        widget.querySelector('#btn-clear').addEventListener('click', () => {
+            if (confirm('Очистить все запросы?')) {
+                capturedRequests = [];
+                localStorage.removeItem('_interceptedRequests');
+                widget.querySelector('#req-count').textContent = '0';
+                showToast('Очищено');
+            }
+        });
+        
+        // Обновление счётчика запросов
+        setInterval(() => {
+            const countEl = widget.querySelector('#req-count');
+            if (countEl) countEl.textContent = capturedRequests.length;
+        }, 2000);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -887,10 +1011,11 @@
         WarehouseModule,
         getCompanyId: () => COMPANY_ID,
         getConfig: loadConfig,
-        setConfig: saveConfig
+        setConfig: saveConfig,
+        getRequests: () => capturedRequests
     };
 
-    console.log('Ozon Toolbox v2.1 loaded');
+    console.log('Ozon Toolbox v3.0 loaded');
     console.log(`Company ID: ${COMPANY_ID}`);
 
 })();
