@@ -3,18 +3,27 @@
  * 
  * Запускать на странице: https://seller.ozon.ru/app/warehouse
  * 
+ * Company ID берётся автоматически из cookie!
  * Указать только:
- * 1. companyId - ID компании
- * 2. warehouseAddress - полный адрес склада
+ * 1. warehouseAddress - полный адрес склада
  * 
  * Всё остальное скрипт сделает автоматически!
  */
 
+// ==================== ПОЛУЧЕНИЕ COMPANY ID ИЗ COOKIE ====================
+
+function getCompanyIdFromCookie() {
+    const match = document.cookie.match(/sc_company_id=(\d+)/);
+    return match ? parseInt(match[1]) : null;
+}
+
+const AUTO_COMPANY_ID = getCompanyIdFromCookie();
+
 // ==================== НАСТРОЙКИ (ТОЛЬКО ЭТО МЕНЯТЬ!) ====================
 
 const CONFIG = {
-    // ID компании (обязательно)
-    companyId: 2722344,
+    // ID компании (автоматически из cookie, или укажите вручную)
+    companyId: AUTO_COMPANY_ID || 0,  // ← Автоматически!
     
     // Полный адрес склада (обязательно)
     warehouseAddress: "188490, Россия, Ленинградская обл, Кингисеппский р-н, г Ивангород, ул Матросова, 2",
@@ -456,7 +465,7 @@ function validateConfig() {
     const errors = [];
     
     if (!CONFIG.companyId || CONFIG.companyId <= 0) {
-        errors.push("companyId не указан или некорректен");
+        errors.push("❌ Company ID не найден в cookie! Убедитесь что вы залогинены на seller.ozon.ru");
     }
     if (!CONFIG.warehouseAddress || CONFIG.warehouseAddress.trim().length < 10) {
         errors.push("warehouseAddress не указан или слишком короткий");

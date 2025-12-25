@@ -128,6 +128,19 @@
     console.log(`✅ ${requests.length} запросов скопировано в буфер обмена!`);
   };
   
+  window.downloadRequests = function(filename = 'requests.json') {
+    const requests = JSON.parse(localStorage.getItem('_interceptedRequests') || '[]');
+    const text = JSON.stringify(requests, null, 2);
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    console.log(`📥 ${requests.length} запросов сохранено в ${filename}`);
+  };
+  
   window.clearRequests = function() {
     capturedRequests = [];
     localStorage.removeItem('_interceptedRequests');
@@ -163,6 +176,7 @@
   console.log('   showRequests()    - показать все запросы');
   console.log('   showAPIRequests() - показать только API запросы');
   console.log('   copyRequests()    - скопировать в буфер');
+  console.log('   downloadRequests()- скачать в файл');
   console.log('   clearRequests()   - очистить список');
   console.log('   getRequests()     - получить массив запросов');
   console.log('═══════════════════════════════════════════════════════');

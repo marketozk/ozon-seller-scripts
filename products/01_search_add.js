@@ -1,13 +1,25 @@
 (async () => {
   try {
+    // ═══════════════ ПОЛУЧЕНИЕ COMPANY ID ═══════════════
+    function getCompanyIdFromCookie() {
+        const match = document.cookie.match(/sc_company_id=(\d+)/);
+        return match ? match[1] : null;
+    }
+    
     // ═══════════════ НАСТРОЙКИ ═══════════════
     const searchQuery = "губка";     // ← СЛОВО ДЛЯ ПОИСКА
-    const companyId = "2722410";      // ← ID ВАШЕГО МАГАЗИНА
+    const companyId = getCompanyIdFromCookie() || "0";  // ← АВТОМАТИЧЕСКИ из cookie!
     const limit = 10;                 // ← ТОВАРОВ НА СТРАНИЦУ
     const maxPages = 20;              // ← КОЛИЧЕСТВО СТРАНИЦ
     const price = "3100";             // ← ЦЕНА ТОВАРА
     const maxToAdd = 9;               // ← МАКС. ТОВАРОВ ДЛЯ ДОБАВЛЕНИЯ
     // ═════════════════════════════════════════
+    
+    console.log(`🏢 Company ID: ${companyId} (из cookie)`);
+    
+    if (!companyId || companyId === "0") {
+        throw new Error("❌ Company ID не найден в cookie! Убедитесь что вы залогинены на seller.ozon.ru");
+    }
     
     let allItems = [];
     let lastId = null;
