@@ -119,8 +119,8 @@
             deliveryTimeMinutes: 15,
             courierSpeedKmh: 30,
             workingDays: [1,2,3,4,5,6,7],
-            workingHoursFrom: "09:00",
-            workingHoursTo: "21:00",
+            workingHoursFrom: "08:00",
+            workingHoursTo: "22:00",
             speedMode: "human"
         }
     };
@@ -619,8 +619,10 @@
                 border-radius: 12px;
                 box-shadow: 0 4px 20px rgba(0,0,0,0.15);
                 width: 320px;
-                max-height: 80vh;
+                resize: both;
                 overflow: hidden;
+                min-width: 280px;
+                min-height: 200px;
             }
             
             #ozon-toolbox .panel.open { display: block; }
@@ -665,8 +667,6 @@
             #ozon-toolbox .tab-content {
                 display: none;
                 padding: 15px;
-                max-height: 400px;
-                overflow-y: auto;
             }
             
             #ozon-toolbox .tab-content.active { display: block; }
@@ -835,11 +835,11 @@
                     <div class="row">
                         <div class="field">
                             <label>Начало</label>
-                            <input type="time" id="cfg-workFrom" value="${config.warehouse.workingHoursFrom}">
+                            <input type="text" id="cfg-workFrom" value="${config.warehouse.workingHoursFrom}" placeholder="08:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5">
                         </div>
                         <div class="field">
                             <label>Конец</label>
-                            <input type="time" id="cfg-workTo" value="${config.warehouse.workingHoursTo}">
+                            <input type="text" id="cfg-workTo" value="${config.warehouse.workingHoursTo}" placeholder="22:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5">
                         </div>
                     </div>
                     
