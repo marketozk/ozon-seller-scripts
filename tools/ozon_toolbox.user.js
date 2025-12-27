@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ozon Seller Toolbox
 // @namespace    http://tampermonkey.net/
-// @version      3.9
+// @version      4.0
 // @description  Полный набор: товары + склады (API v3) + цены + SKU + реклама + перехватчик
 // @author       You
 // @match        https://seller.ozon.ru/*
@@ -22,7 +22,11 @@
     const DEBUG = JSON.parse(localStorage.getItem('_ozonToolboxDebug') ?? 'true');
     const MAX_CAPTURED_REQUESTS = 500; // Лимит запросов в localStorage
     
-    // Защита от XSS (без DOM, работает при document-start)
+    /**
+     * Защита от XSS-инъекций (работает при document-start, без DOM)
+     * @param {string} text - Текст для экранирования
+     * @returns {string} Экранированный текст
+     */
     function escapeHtml(text) {
         if (!text) return '';
         return String(text)
@@ -32,7 +36,33 @@
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
     }
+
+    /**
+     * Форматирует текущую дату в формате DD.MM.YYYY
+     * @returns {string} Дата в формате DD.MM.YYYY
+     */
+    function formatTodayDate() {
+        const today = new Date();
+        const day = String(today.getDate()).padStart(2, '0');
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const year = today.getFullYear();
+        return `${day}.${month}.${year}`;
+    }
+
+    /**
+     * Форматирует текущую дату в формате YYYY-MM-DD (ISO)
+     * @returns {string} Дата в формате YYYY-MM-DD
+     */
+    function formatTodayDateISO() {
+        return new Date().toISOString().split('T')[0];
+    }
     
+    /**
+     * Логирование отладочных сообщений (при DEBUG=true)
+     * @param {string} module - Название модуля
+     * @param {string} message - Сообщение
+     * @param {*} [data] - Дополнительные данные
+     */
     function debugLog(module, message, data = null) {
         if (!DEBUG) return;
         const timestamp = new Date().toLocaleTimeString();
@@ -44,6 +74,12 @@
         }
     }
     
+    /**
+     * Логирование ошибок (всегда выводится)
+     * @param {string} module - Название модуля
+     * @param {string} message - Сообщение об ошибке
+     * @param {Error} error - Объект ошибки
+     */
     function debugError(module, message, error) {
         const timestamp = new Date().toLocaleTimeString();
         const prefix = `[${timestamp}] [OzonToolbox:${module}] ERROR:`;
@@ -381,7 +417,10 @@
         try { return JSON.parse(str); } catch { return str; }
     }
 
-    // Получение cookies для сохранения
+    /**
+     * Получение cookies в виде объекта {name: value}
+     * @returns {Object.<string, string>} Объект с cookies
+     */
     function getCookiesObject() {
         const cookies = {};
         document.cookie.split(';').forEach(cookie => {
@@ -393,7 +432,10 @@
         return cookies;
     }
 
-    // Получить полную строку cookies для curl/Python
+    /**
+     * Получение cookies в виде строки
+     * @returns {string} Строка cookies
+     */
     function getCookiesString() {
         return document.cookie;
     }
@@ -441,14 +483,19 @@
         };
     }
 
-    // Генерация curl команды
+    /**
+     * Генерация curl команды для тестирования API
+     * @param {Object.<string, string>} cookies - Объект с cookies
+     * @returns {string} curl команда
+     */
     function generateCurlCommand(cookies) {
         const cookieStr = Object.entries(cookies)
             .map(([k, v]) => `${k}=${v}`)
             .join('; ');
+        const companyId = cookies.sc_company_id || COMPANY_ID || 'NOT_FOUND';
         
         return `# Ozon Seller API Test
-# Company ID: ${cookies.sc_company_id || COMPANY_ID}
+# Company ID: ${companyId}
 # Сгенерировано: ${new Date().toISOString()}
 #
 # ВАЖНО: Добавьте HttpOnly cookies из DevTools!
@@ -459,24 +506,29 @@ curl -X POST 'https://seller.ozon.ru/api/v2/company/finance-info' \\
   -H 'Content-Type: application/json' \\
   -H 'x-o3-app-name: seller-ui' \\
   -H 'x-o3-language: ru' \\
-  -H 'x-o3-company-id: ${cookies.sc_company_id || COMPANY_ID}' \\
+  -H 'x-o3-company-id: ${companyId}' \\
   -H 'Origin: https://seller.ozon.ru' \\
   -H 'Referer: https://seller.ozon.ru/' \\
   -H 'User-Agent: ${navigator.userAgent}' \\
   -H 'Cookie: ${cookieStr}' \\
-  -d '{"company_id":"${cookies.sc_company_id || COMPANY_ID}"}'`;
+  -d '{"company_id":"${companyId}"}'`;
     }
 
-    // Генерация Python кода
+    /**
+     * Генерация Python кода для тестирования API
+     * @param {Object.<string, string>} cookies - Объект с cookies
+     * @returns {string} Python код
+     */
     function generatePythonCode(cookies) {
         const cookieStr = Object.entries(cookies)
             .map(([k, v]) => `${k}=${v}`)
             .join('; ');
+        const companyId = cookies.sc_company_id || COMPANY_ID || 'NOT_FOUND';
         
         return `"""
 Ozon Seller API - тестовый скрипт
 Сгенерирован: ${new Date().toISOString()}
-Company ID: ${cookies.sc_company_id || COMPANY_ID}
+Company ID: ${companyId}
 
 ВАЖНО: Этот код работает только с ПОЛНЫМИ cookies!
 HttpOnly cookies (аутентификация) недоступны через JavaScript.
@@ -498,7 +550,7 @@ HEADERS = {
     'Content-Type': 'application/json',
     'x-o3-app-name': 'seller-ui',
     'x-o3-language': 'ru',
-    'x-o3-company-id': '${cookies.sc_company_id || COMPANY_ID}',
+    'x-o3-company-id': '${companyId}',
     'User-Agent': '${navigator.userAgent}',
     'Cookie': COOKIES,
     'Origin': 'https://seller.ozon.ru',
@@ -508,7 +560,7 @@ HEADERS = {
 def test_api():
     """Тест API - получение финансовой информации"""
     url = 'https://seller.ozon.ru/api/v2/company/finance-info'
-    data = {'company_id': '${cookies.sc_company_id || COMPANY_ID}'}
+    data = {'company_id': '${companyId}'}
     
     response = requests.post(url, headers=HEADERS, json=data)
     
@@ -1101,6 +1153,15 @@ if __name__ == "__main__":
     // МОДУЛЬ: СОЗДАНИЕ СКЛАДА
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /**
+     * Коэффициент уменьшения радиуса доставки.
+     * Используется для расчёта реалистичной зоны покрытия:
+     * - 1.0 = теоретический максимум (прямая линия)
+     * - 0.7 = учитывает дороги, повороты, трафик (~70% от прямой)
+     * Формула: radius = скорость * время * RADIUS_COEFFICIENT
+     */
+    const RADIUS_COEFFICIENT = 0.7;
+
     const WarehouseModule = {
         isRunning: false,
         shouldStop: false,
@@ -1330,7 +1391,8 @@ if __name__ == "__main__":
                 if (this.shouldStop) throw new Error('Остановлено');
                 logWh('Шаг 5/8: Создание полигона...');
                 
-                const radiusKm = Math.round((courierSpeedKmh * deliveryTimeMinutes / 60) * 0.7 * 10) / 10;
+                // Расчёт радиуса: скорость * время * коэффициент реалистичности
+                const radiusKm = Math.round((courierSpeedKmh * deliveryTimeMinutes / 60) * RADIUS_COEFFICIENT * 10) / 10;
                 this.state.radiusKm = radiusKm;
                 
                 const polygonCoords = this.generateCirclePolygon(this.state.lat, this.state.lng, radiusKm, 24);
@@ -1633,14 +1695,8 @@ if __name__ == "__main__":
     const PromotionModule = {
         isRunning: false,
         
-        // Получить сегодняшнюю дату в формате DD.MM.YYYY
-        getTodayDate() {
-            const today = new Date();
-            const day = String(today.getDate()).padStart(2, '0');
-            const month = String(today.getMonth() + 1).padStart(2, '0');
-            const year = today.getFullYear();
-            return `${day}.${month}.${year}`;
-        },
+        // Делегирует к общей утилите formatTodayDate()
+        getTodayDate: formatTodayDate,
         
         async run(campaignName) {
             if (this.isRunning) {
@@ -2235,7 +2291,7 @@ if __name__ == "__main__":
                     
                     <div class="field">
                         <label>Дата начала</label>
-                        <input type="text" id="cfg-campaignDate" value="${(() => { const d = new Date(); return String(d.getDate()).padStart(2,'0') + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + d.getFullYear(); })()}" readonly style="background:#f5f5f5">
+                        <input type="text" id="cfg-campaignDate" value="${formatTodayDate()}" readonly style="background:#f5f5f5">
                         <div class="hint">Автоматически сегодняшняя дата</div>
                     </div>
                     
@@ -2415,9 +2471,11 @@ if __name__ == "__main__":
         widget.querySelector('#btn-download').addEventListener('click', () => {
             const blob = new Blob([JSON.stringify(capturedRequests, null, 2)], { type: 'application/json' });
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `ozon_requests_${new Date().toISOString().split('T')[0]}.json`;
+            const blobUrl = URL.createObjectURL(blob);
+            a.href = blobUrl;
+            a.download = `ozon_requests_${formatTodayDateISO()}.json`;
             a.click();
+            URL.revokeObjectURL(blobUrl); // Освобождаем память
             showToast(`Скачано ${capturedRequests.length} запросов`);
         });
         
@@ -2440,14 +2498,16 @@ if __name__ == "__main__":
             const sessionData = getSessionData();
             const blob = new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' });
             const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `ozon_session_${new Date().toISOString().split('T')[0]}.json`;
+            const blobUrl = URL.createObjectURL(blob);
+            a.href = blobUrl;
+            a.download = `ozon_session_${formatTodayDateISO()}.json`;
             a.click();
+            URL.revokeObjectURL(blobUrl); // Освобождаем память
             showToast('Сессия экспортирована в JSON');
         });
         
         widget.querySelector('#btn-export-curl').addEventListener('click', () => {
-            const cookies = getCookiesString();
+            const cookies = getCookiesObject();
             const curl = generateCurlCommand(cookies);
             navigator.clipboard.writeText(curl);
             showToast('curl команда скопирована');
@@ -2456,7 +2516,7 @@ if __name__ == "__main__":
         });
         
         widget.querySelector('#btn-export-python').addEventListener('click', () => {
-            const cookies = getCookiesString();
+            const cookies = getCookiesObject();
             const python = generatePythonCode(cookies);
             navigator.clipboard.writeText(python);
             showToast('Python код скопирован');
@@ -2468,10 +2528,16 @@ if __name__ == "__main__":
             showCookieExportHelp();
         });
         
-        // Обновление счётчика запросов
-        setInterval(() => {
+        // Обновление счётчика запросов (сохраняем ID для возможности очистки)
+        const reqCountIntervalId = setInterval(() => {
             const countEl = widget.querySelector('#req-count');
-            if (countEl) countEl.textContent = capturedRequests.length;
+            if (countEl) {
+                countEl.textContent = capturedRequests.length;
+            } else {
+                // Виджет удалён - очищаем интервал
+                clearInterval(reqCountIntervalId);
+                debugLog('Widget', 'Интервал счётчика очищен (виджет удалён)');
+            }
         }, 2000);
         
         debugLog('Widget', 'Виджет успешно добавлен в DOM');
@@ -2539,8 +2605,8 @@ if __name__ == "__main__":
         }
     };
 
-    console.log('Ozon Toolbox v3.9 loaded');
-    console.log(`Company ID: ${COMPANY_ID}`);
+    console.log('Ozon Toolbox v4.0 loaded');
+    console.log(`Company ID: ${COMPANY_ID || 'не найден'}`);
     console.log('Склады: API v3 | Экспорт сессии: window.OzonToolbox.session');
 
 })();
