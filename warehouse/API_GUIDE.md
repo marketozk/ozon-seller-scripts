@@ -30,6 +30,62 @@ createWarehouseFully()
 
 ---
 
+## ⚠️ КРИТИЧНО: Обязательные заголовки
+
+**Без этих заголовков API возвращает 403 "Failed to get company ID"!**
+
+### Обязательные заголовки для ВСЕХ запросов к API Ozon Seller:
+
+```http
+Content-Type: application/json
+Accept: application/json, text/plain, */*
+x-o3-app-name: seller-ui
+x-o3-language: ru
+accept-language: ru
+x-o3-company-id: <COMPANY_ID>
+x-o3-page-type: warehouse-other
+```
+
+### Описание заголовков:
+
+| Заголовок | Значение | Обязательный | Описание |
+|-----------|----------|--------------|----------|
+| `x-o3-app-name` | `seller-ui` | ✅ Да | Идентификатор приложения |
+| `x-o3-language` | `ru` | ✅ Да | Язык интерфейса |
+| `x-o3-company-id` | `2721175` | ✅ Да | ID компании продавца |
+| `x-o3-page-type` | `warehouse-other` | ⚠️ Рекомендуется | Тип страницы (для склада) |
+| `accept-language` | `ru` | ⚠️ Рекомендуется | Язык Accept |
+| `Content-Type` | `application/json` | ✅ Да | Формат тела запроса |
+
+### Как получить `x-o3-company-id`:
+
+1. **Из cookies:** `document.cookie` → `sc_company_id=2721175`
+2. **Из URL:** `https://seller.ozon.ru/app/...` → параметр `company_id`
+3. **Из localStorage:** `localStorage.getItem('sc_company_id')`
+
+### Пример JavaScript:
+
+```javascript
+const companyId = document.cookie.match(/sc_company_id=(\d+)/)?.[1] || 'NOT_FOUND';
+
+const response = await fetch('/api/delivery-polygon-service/area/create', {
+    method: 'POST',
+    credentials: 'include',  // ← Важно для отправки cookies!
+    headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, text/plain, */*',
+        'x-o3-app-name': 'seller-ui',
+        'x-o3-language': 'ru',
+        'accept-language': 'ru',
+        'x-o3-company-id': companyId,
+        'x-o3-page-type': 'warehouse-other'
+    },
+    body: JSON.stringify({ ... })
+});
+```
+
+---
+
 ## Обзор процесса (8 шагов)
 
 | Шаг | Действие | API |
