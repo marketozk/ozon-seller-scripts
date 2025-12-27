@@ -989,11 +989,20 @@ if __name__ == "__main__":
     }
 
     async function apiRequest(url, options = {}) {
+        // Получаем company_id из cookies или константы
+        const companyId = getCookiesObject().sc_company_id || COMPANY_ID;
+        
         const response = await fetch(url, {
             ...options,
-            credentials: 'include', // Важно! Передаём cookies для аутентификации
+            credentials: 'include',
             headers: {
                 'Content-Type': 'application/json',
+                'Accept': 'application/json, text/plain, */*',
+                'x-o3-app-name': 'seller-ui',
+                'x-o3-language': 'ru',
+                'accept-language': 'ru',
+                'x-o3-company-id': companyId,
+                'x-o3-page-type': 'warehouse-other',
                 ...options.headers
             }
         });
