@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         Ozon Seller Toolbox
 // @namespace    http://tampermonkey.net/
-// @version      4.12
+// @version      4.16
 // @description  Полный набор: товары + склады (API v3) + цены + SKU + реклама + перехватчик
 // @author       You
 // @match        https://seller.ozon.ru/*
 // @grant        none
 // @run-at       document-start
-// @updateURL    file:///C:/Users/regis/OneDrive/Рабочий%20стол/Проект%20Озон/ozon-seller-scripts/tools/ozon_toolbox.user.js
-// @downloadURL  file:///C:/Users/regis/OneDrive/Рабочий%20стол/Проект%20Озон/ozon-seller-scripts/tools/ozon_toolbox.user.js
+// @updateURL    https://raw.githubusercontent.com/marketozk/ozon-seller-scripts/master/tools/ozon_toolbox.user.js
+// @downloadURL  https://raw.githubusercontent.com/marketozk/ozon-seller-scripts/master/tools/ozon_toolbox.user.js
 // ==/UserScript==
 
 (function() {
@@ -777,6 +777,7 @@ if __name__ == "__main__":
         WAREHOUSE_DRAFT_CREATE: '/api/site/logistic-service/v3/warehouse/draft/create',
         DELIVERY_METHOD_CREATE: '/api/delivery-method-service/delivery-method/create',
         DELIVERY_METHOD_ACTIVATE: '/api/delivery-method-service/delivery-method/activate',
+        COURIER_SCHEDULE_SET: '/api/delivery-method-service/delivery-method/courier-schedule/set',
         DELIVERY_AREA_CREATE: '/api/delivery-polygon-service/area/create',
         DELIVERY_AREA_UPDATE: '/api/delivery-polygon-service/area/update',
         DELIVERY_POLYGON_CREATE: '/api/delivery-polygon-service/v2/polygon/create',
@@ -966,7 +967,8 @@ if __name__ == "__main__":
             return {
                 products: { ...DEFAULT_CONFIG.products, ...parsed.products },
                 warehouse: { ...DEFAULT_CONFIG.warehouse, ...parsed.warehouse },
-                priceChanger: { ...DEFAULT_CONFIG.priceChanger, ...parsed.priceChanger }
+                priceChanger: { ...DEFAULT_CONFIG.priceChanger, ...parsed.priceChanger },
+                stock: { ...DEFAULT_CONFIG.stock, ...(parsed.stock || {}) }
             };
         } catch {
             return DEFAULT_CONFIG;
@@ -978,7 +980,8 @@ if __name__ == "__main__":
         const merged = {
             products: { ...current.products, ...partial.products },
             warehouse: { ...current.warehouse, ...partial.warehouse },
-            priceChanger: { ...current.priceChanger, ...partial.priceChanger }
+            priceChanger: { ...current.priceChanger, ...partial.priceChanger },
+            stock: { ...current.stock, ...(partial.stock || {}) }
         };
         localStorage.setItem('_ozonToolboxConfig', JSON.stringify(merged));
     }
@@ -1260,22 +1263,26 @@ if __name__ == "__main__":
         
         // Генерация телефона
         generatePhone() {
-            const code = Math.floor(Math.random() * 900) + 100;
+            // Реальные мобильные коды России: 9XX (900-999)
+            const code = Math.floor(Math.random() * 100) + 900; // 900-999
             const num1 = Math.floor(Math.random() * 900) + 100;
             const num2 = Math.floor(Math.random() * 90) + 10;
             const num3 = Math.floor(Math.random() * 90) + 10;
             return `+7 ${code} ${num1} ${num2} ${num3}`;
         },
         
-        // Генерация полигона (круг)
+        // Генерация полигона (неровный круг для естественного вида)
         generateCirclePolygon(centerLat, centerLng, radiusKm, points = 24) {
             const coordinates = [];
             const earthRadius = 6371;
             
             for (let i = 0; i < points; i++) {
                 const angle = (2 * Math.PI * i) / points;
-                const dLat = (radiusKm / earthRadius) * Math.cos(angle) * (180 / Math.PI);
-                const dLng = (radiusKm / earthRadius) * Math.sin(angle) * (180 / Math.PI) / Math.cos(centerLat * Math.PI / 180);
+                // Добавляем случайное отклонение ±15% для неровности
+                const randomFactor = 0.85 + Math.random() * 0.30; // от 0.85 до 1.15
+                const adjustedRadius = radiusKm * randomFactor;
+                const dLat = (adjustedRadius / earthRadius) * Math.cos(angle) * (180 / Math.PI);
+                const dLng = (adjustedRadius / earthRadius) * Math.sin(angle) * (180 / Math.PI) / Math.cos(centerLat * Math.PI / 180);
                 coordinates.push([centerLat + dLat, centerLng + dLng]);
             }
             coordinates.push(coordinates[0]); // Замыкаем
@@ -1329,13 +1336,13 @@ if __name__ == "__main__":
             logWh(`Адрес: ${warehouseAddress.substring(0, 60)}...`);
             logWh(`Время доставки: ${deliveryTimeMinutes} мин`);
             
-            notify(0, 8, 'Запуск', `Адрес: ${warehouseAddress.substring(0, 40)}...`, 'info');
+            notify(0, 9, 'Запуск', `Адрес: ${warehouseAddress.substring(0, 40)}...`, 'info');
             
             try {
                 // ШАГ 1: Геокодирование
                 if (this.shouldStop) throw new Error('Остановлено');
                 logWh('Шаг 1/8: Геокодирование адреса...');
-                notify(1, 8, 'Геокодирование', 'Определяем координаты адреса...');
+                notify(1, 9, 'Геокодирование', 'Определяем координаты адреса...');
                 
                 const encodedAddress = encodeURIComponent(warehouseAddress.trim());
                 let geoData;
@@ -1486,17 +1493,30 @@ if __name__ == "__main__":
                 }
                 
                 logWh(`✓ Координаты: ${this.state.lat.toFixed(5)}, ${this.state.lng.toFixed(5)}`);
-                notify(1, 8, 'Координаты ✓', `${this.state.lat.toFixed(4)}, ${this.state.lng.toFixed(4)}`, 'success');
+                notify(1, 9, 'Координаты ✓', `${this.state.lat.toFixed(4)}, ${this.state.lng.toFixed(4)}`, 'success');
                 await delay(2000);
                 
                 // ШАГ 2: Создание черновика склада
                 if (this.shouldStop) throw new Error('Остановлено');
-                logWh('Шаг 2/8: Создание черновика склада...');
-                notify(2, 8, 'Черновик', 'Создаём склад...');
+                logWh('Шаг 2/9: Создание черновика склада...');
+                notify(2, 9, 'Черновик', 'Создаём склад...');
+                
+                // Извлекаем город из адреса если геокодер не вернул
+                let cityName = this.state.parsedAddress.city;
+                if (!cityName) {
+                    // Пробуем извлечь город из адреса (формат: "..., г Город, ..." или "..., Город, ул...")
+                    const cityMatch = warehouseAddress.match(/(?:г\.?\s*|город\s+)([^,]+)/i) ||
+                                      warehouseAddress.match(/,\s*([^,]+?)\s*,\s*(?:ул|улица|пр|проспект|пер|переулок)/i);
+                    if (cityMatch) {
+                        cityName = cityMatch[1].trim();
+                    }
+                }
                 
                 const autoName = warehouseName?.trim() || 
-                    `Склад ${this.state.parsedAddress.city || 'Express'}`;
+                    (cityName ? `Склад ${cityName}` : 'Склад Express');
                 const autoPhone = config.warehouse.warehousePhone?.trim() || this.generatePhone();
+                
+                logWh(`Название склада: ${autoName}`);
                 
                 // Формируем расписание
                 const workingHours = {};
@@ -1536,13 +1556,13 @@ if __name__ == "__main__":
                     throw new Error(`Ошибка создания черновика: ${JSON.stringify(draftData)}`);
                 }
                 logWh(`✓ Черновик: ${this.state.warehouseDraftId}`);
-                notify(2, 8, 'Черновик ✓', `ID: ${this.state.warehouseDraftId}`, 'success');
+                notify(2, 9, 'Черновик ✓', `ID: ${this.state.warehouseDraftId}`, 'success');
                 await delay(3000);
                 
                 // ШАГ 3: Создание метода доставки
                 if (this.shouldStop) throw new Error('Остановлено');
                 logWh('Шаг 3/8: Создание метода доставки...');
-                notify(3, 8, 'Метод доставки', 'Создаём Express метод...');
+                notify(3, 9, 'Метод доставки', 'Создаём Express метод...');
                 
                 const methodName = `Экспресс. Самостоятельно. ${autoName}`;
                 
@@ -1573,13 +1593,13 @@ if __name__ == "__main__":
                     throw new Error(`Ошибка создания метода: ${JSON.stringify(methodData)}`);
                 }
                 logWh(`✓ Метод доставки: ${this.state.methodId}`);
-                notify(3, 8, 'Метод ✓', `ID: ${this.state.methodId}`, 'success');
+                notify(3, 9, 'Метод ✓', `ID: ${this.state.methodId}`, 'success');
                 await delay(3000);
                 
                 // ШАГ 4: Создание зоны доставки
                 if (this.shouldStop) throw new Error('Остановлено');
                 logWh('Шаг 4/8: Создание зоны доставки...');
-                notify(4, 8, 'Зона доставки', 'Создаём область...');
+                notify(4, 9, 'Зона доставки', 'Создаём область...');
                 
                 const areaData = await apiRequest(API.DELIVERY_AREA_CREATE, {
                     method: 'POST',
@@ -1594,13 +1614,13 @@ if __name__ == "__main__":
                 
                 this.state.areaId = areaData.id;
                 logWh(`✓ Зона: ${this.state.areaId}`);
-                notify(4, 8, 'Зона ✓', `ID: ${this.state.areaId}`, 'success');
+                notify(4, 9, 'Зона ✓', `ID: ${this.state.areaId}`, 'success');
                 await delay(2000);
                 
                 // ШАГ 5: Создание полигона
                 if (this.shouldStop) throw new Error('Остановлено');
                 logWh('Шаг 5/8: Создание полигона...');
-                notify(5, 8, 'Полигон', 'Создаём область покрытия...');
+                notify(5, 9, 'Полигон', 'Создаём область покрытия...');
                 
                 // Расчёт радиуса: скорость * время * коэффициент реалистичности
                 const radiusKm = Math.round((courierSpeedKmh * deliveryTimeMinutes / 60) * RADIUS_COEFFICIENT * 10) / 10;
@@ -1617,13 +1637,13 @@ if __name__ == "__main__":
                 
                 this.state.polygonId = polygonData.polygonId;
                 logWh(`✓ Полигон: ${this.state.polygonId} (радиус ${radiusKm} км)`);
-                notify(5, 8, 'Полигон ✓', `Радиус: ${radiusKm} км`, 'success');
+                notify(5, 9, 'Полигон ✓', `Радиус: ${radiusKm} км`, 'success');
                 await delay(1500);
                 
                 // ШАГ 6: Привязка полигона к зоне
                 if (this.shouldStop) throw new Error('Остановлено');
                 logWh('Шаг 6/8: Привязка полигона к зоне...');
-                notify(6, 8, 'Привязка', 'Связываем полигон с зоной...');
+                notify(6, 9, 'Привязка', 'Связываем полигон с зоной...');
                 
                 await apiRequest(API.DELIVERY_AREA_UPDATE, {
                     method: 'POST',
@@ -1637,13 +1657,13 @@ if __name__ == "__main__":
                     })
                 });
                 logWh('✓ Полигон привязан');
-                notify(6, 8, 'Привязка ✓', 'Полигон связан', 'success');
+                notify(6, 9, 'Привязка ✓', 'Полигон связан', 'success');
                 await delay(2000);
                 
                 // ШАГ 7: Привязка склада и настройка возвратов
                 if (this.shouldStop) throw new Error('Остановлено');
                 logWh('Шаг 7/8: Привязка склада и настройка возвратов...');
-                notify(7, 8, 'Настройки', 'Привязываем склад, настраиваем возвраты...');
+                notify(7, 9, 'Настройки', 'Привязываем склад, настраиваем возвраты...');
                 
                 await apiRequest(API.DELIVERY_WAREHOUSE_LINK, {
                     method: 'POST',
@@ -1669,13 +1689,30 @@ if __name__ == "__main__":
                     })
                 });
                 logWh('✓ Склад привязан, возвраты настроены');
-                notify(7, 8, 'Настройки ✓', 'Склад привязан', 'success');
+                notify(7, 9, 'Настройки ✓', 'Склад привязан', 'success');
                 await delay(2000);
                 
-                // ШАГ 8: Активация
+                // ШАГ 8: Установка расписания курьера (такое же как у склада)
                 if (this.shouldStop) throw new Error('Остановлено');
-                logWh('Шаг 8/8: Активация метода доставки...');
-                notify(8, 8, 'Активация', 'Запускаем склад...');
+                logWh('Шаг 8/9: Установка расписания курьера...');
+                notify(8, 9, 'Расписание', 'Настройка графика работы...');
+                
+                await apiRequest(API.COURIER_SCHEDULE_SET, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        company_id: companyId,
+                        is_same_as_warehouse: true,
+                        delivery_method_id: parseInt(this.state.methodId)
+                    })
+                });
+                logWh('✓ Расписание курьера установлено');
+                notify(8, 9, 'Расписание ✓', 'График работы настроен', 'success');
+                await delay(1500);
+                
+                // ШАГ 9: Активация
+                if (this.shouldStop) throw new Error('Остановлено');
+                logWh('Шаг 9/9: Активация метода доставки...');
+                notify(9, 9, 'Активация', 'Запускаем склад...');
                 
                 const activateData = await apiRequest(API.DELIVERY_METHOD_ACTIVATE, {
                     method: 'POST',
@@ -1697,13 +1734,13 @@ if __name__ == "__main__":
                 logWh(`Радиус: ${radiusKm} км`);
                 logWh('════════════════════════════════════');
                 
-                notify(8, 8, 'ГОТОВО! 🎉', `Склад ID: ${this.state.warehouseId}`, 'success');
+                notify(9, 9, 'ГОТОВО! 🎉', `Склад ID: ${this.state.warehouseId}`, 'success');
                 showToast('🎉 Склад создан!', 'success');
                 
             } catch (error) {
                 logWh(`❌ Ошибка: ${error.message}`);
                 logWh(`Состояние: ${JSON.stringify(this.state)}`);
-                notify(0, 8, 'ОШИБКА ❌', error.message.substring(0, 60), 'error');
+                notify(0, 9, 'ОШИБКА ❌', error.message.substring(0, 60), 'error');
                 showToast(`Ошибка: ${error.message.substring(0, 40)}`, 'error');
             } finally {
                 this.isRunning = false;
@@ -2159,7 +2196,12 @@ if __name__ == "__main__":
             
             const logStock = (msg) => log(`📦 ${msg}`);
             const notify = (step, total, title, message, type = 'info') => {
-                NotificationSystem.showWithProgress(title, message, (step / total) * 100, type);
+                NotificationSystem.show({
+                    title: `📦 Остатки [${step}/${total}]: ${title}`,
+                    message: message,
+                    type: type,
+                    duration: type === 'error' ? 8000 : 4000
+                });
             };
             
             logStock('=== УСТАНОВКА ОСТАТКОВ ===' );
