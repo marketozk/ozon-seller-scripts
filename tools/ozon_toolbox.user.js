@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ozon Seller Toolbox
 // @namespace    http://tampermonkey.net/
-// @version      4.5
+// @version      4.6
 // @description  Полный набор: товары + склады (API v3) + цены + SKU + реклама + перехватчик
 // @author       You
 // @match        https://seller.ozon.ru/*
@@ -1486,11 +1486,10 @@ if __name__ == "__main__":
                 const areaData = await apiRequest(API.DELIVERY_AREA_CREATE, {
                     method: 'POST',
                     body: JSON.stringify({
-                        company_id: companyId,
                         area: {
-                            delivery_method_id: this.state.methodId,
+                            delivery_method_id: String(this.state.methodId),
                             delivery_time: String(deliveryTimeMinutes),
-                            name: `Доставка ${deliveryTimeMinutes} мин`
+                            name: `Область доставки ${deliveryTimeMinutes} мин`
                         }
                     })
                 });
