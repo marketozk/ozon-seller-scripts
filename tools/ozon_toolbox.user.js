@@ -2389,10 +2389,10 @@ if __name__ == "__main__":
                 background: white;
                 border-radius: 12px;
                 box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-                width: 320px;
+                width: 420px;
                 resize: both;
                 overflow: hidden;
-                min-width: 280px;
+                min-width: 380px;
                 min-height: 200px;
             }
             
@@ -2418,18 +2418,21 @@ if __name__ == "__main__":
             #ozon-toolbox .tabs {
                 display: flex;
                 border-bottom: 1px solid #eee;
+                flex-wrap: nowrap;
+                overflow-x: auto;
             }
             
             #ozon-toolbox .tab {
                 flex: 1;
-                padding: 10px;
+                padding: 10px 8px;
                 text-align: center;
                 cursor: pointer;
                 border: none;
                 background: none;
-                font-size: 12px;
+                font-size: 11px;
                 color: #666;
                 transition: all 0.2s;
+                white-space: nowrap;
             }
             
             #ozon-toolbox .tab:hover { background: #f5f5f5; }
