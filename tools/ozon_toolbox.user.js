@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ozon Seller Toolbox
 // @namespace    http://tampermonkey.net/
-// @version      4.6
+// @version      4.7
 // @description  Полный набор: товары + склады (API v3) + цены + SKU + реклама + перехватчик
 // @author       You
 // @match        https://seller.ozon.ru/*
@@ -991,6 +991,7 @@ if __name__ == "__main__":
     async function apiRequest(url, options = {}) {
         const response = await fetch(url, {
             ...options,
+            credentials: 'include', // Важно! Передаём cookies для аутентификации
             headers: {
                 'Content-Type': 'application/json',
                 ...options.headers
