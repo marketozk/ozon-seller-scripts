@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ozon Seller Toolbox
 // @namespace    http://tampermonkey.net/
-// @version      4.4
+// @version      4.5
 // @description  Полный набор: товары + склады (API v3) + цены + SKU + реклама + перехватчик
 // @author       You
 // @match        https://seller.ozon.ru/*
@@ -1446,11 +1446,15 @@ if __name__ == "__main__":
                 if (this.shouldStop) throw new Error('Остановлено');
                 logWh('Шаг 3/8: Создание метода доставки...');
                 
+                // Уникальный суффикс для избежания конфликта имён
+                const uniqueSuffix = Date.now().toString(36).slice(-4).toUpperCase();
+                const methodName = `Экспресс. Самостоятельно. ${autoName} ${uniqueSuffix}`;
+                
                 const methodBody = {
                     company_id: companyId,
                     delivery_type_id: 1,  // self-delivery
                     cutoff: '17:00',
-                    name: `Экспресс. Самостоятельно. ${autoName}`,
+                    name: methodName,
                     tariff_type: 'STANDARD_OZON',
                     prr_setting: '',
                     tpl_integration_type: 'non_integrated',
