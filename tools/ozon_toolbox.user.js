@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ozon Seller Toolbox
 // @namespace    http://tampermonkey.net/
-// @version      4.11
+// @version      4.12
 // @description  Полный набор: товары + склады (API v3) + цены + SKU + реклама + перехватчик
 // @author       You
 // @match        https://seller.ozon.ru/*
@@ -781,7 +781,11 @@ if __name__ == "__main__":
         DELIVERY_AREA_UPDATE: '/api/delivery-polygon-service/area/update',
         DELIVERY_POLYGON_CREATE: '/api/delivery-polygon-service/v2/polygon/create',
         DELIVERY_WAREHOUSE_LINK: '/api/delivery-polygon-service/delivery-method/save/warehouse',
-        RETURNS_SETTING: '/api/seller-returns-methods/v1/returns-setting'
+        RETURNS_SETTING: '/api/seller-returns-methods/v1/returns-setting',
+        
+        // Остатки
+        WAREHOUSE_LIST_SHORT: '/api/site/logistic-service/v2/warehouse/list/short',
+        STOCK_BATCH_SET: '/api/site/item-stock-service/rfbs/item/stock/batch-set'
     };
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -815,6 +819,10 @@ if __name__ == "__main__":
             newPriceMin: 27,       // Новая цена от
             newPriceMax: 50,       // Новая цена до
             userEmail: ''          // Email пользователя для API
+        },
+        stock: {
+            minStock: 10,          // Минимальный остаток
+            maxStock: 50           // Максимальный остаток
         }
     };
 
@@ -2120,6 +2128,182 @@ if __name__ == "__main__":
     };
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // МОДУЛЬ: УСТАНОВКА ОСТАТКОВ
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    const StockModule = {
+        isRunning: false,
+        shouldStop: false,
+        
+        stop() {
+            this.shouldStop = true;
+            log('📦 Остановка...');
+        },
+        
+        async run(config) {
+            if (this.isRunning) {
+                showToast('Уже выполняется!', 'error');
+                return;
+            }
+            
+            const { minStock, maxStock } = config.stock;
+            
+            if (minStock >= maxStock) {
+                showToast('Мин. должен быть меньше макс.!', 'error');
+                return;
+            }
+            
+            this.isRunning = true;
+            this.shouldStop = false;
+            updateButtons();
+            
+            const logStock = (msg) => log(`📦 ${msg}`);
+            const notify = (step, total, title, message, type = 'info') => {
+                NotificationSystem.showWithProgress(title, message, (step / total) * 100, type);
+            };
+            
+            logStock('=== УСТАНОВКА ОСТАТКОВ ===' );
+            logStock(`Диапазон: ${minStock} - ${maxStock}`);
+            notify(0, 3, 'Остатки', 'Начинаем...');
+            
+            try {
+                // ШАГ 1: Получить склады RFBS
+                logStock('Шаг 1/3: Получение складов...');
+                notify(1, 3, 'Склады', 'Загружаем список складов...');
+                
+                const warehouseData = await apiRequest(API.WAREHOUSE_LIST_SHORT, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        company_id: parseInt(COMPANY_ID),
+                        status_not_in: ['disabled']
+                    })
+                });
+                
+                const rfbsWarehouses = (warehouseData.result || []).filter(w => w.is_rfbs);
+                if (rfbsWarehouses.length === 0) {
+                    throw new Error('Нет RFBS складов! Сначала создайте склад.');
+                }
+                
+                const warehouse = rfbsWarehouses[0];
+                logStock(`✓ Склад: ${warehouse.name} (ID: ${warehouse.warehouse_id})`);
+                notify(1, 3, 'Склады ✓', `${warehouse.name}`, 'success');
+                await sleep(1000);
+                
+                // ШАГ 2: Получить товары
+                if (this.shouldStop) throw new Error('Остановлено');
+                logStock('Шаг 2/3: Получение товаров...');
+                notify(2, 3, 'Товары', 'Загружаем список товаров...');
+                
+                const products = [];
+                let cursor = '';
+                let page = 1;
+                
+                while (true) {
+                    if (this.shouldStop) throw new Error('Остановлено');
+                    
+                    const data = await apiRequest(API.PRODUCTS_LIST, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            aggregate: { parts: ['PART_ITEM'], human_texts: true },
+                            filters: { price_color_indexes: [], search: '', categories: [] },
+                            visibility: 'ALL',
+                            sort_by: 'SORT_BY_CREATED_AT',
+                            sort_dir: 'SORT_DIRECTION_DESC',
+                            company_id: COMPANY_ID,
+                            limit: 100,
+                            cursor: cursor,
+                            return_total_items: true
+                        })
+                    });
+                    
+                    if (data.products && data.products.length > 0) {
+                        for (const p of data.products) {
+                            const offerId = p.part_item?.offer_id || p.offer_id;
+                            if (offerId) {
+                                products.push({
+                                    offer_id: offerId,
+                                    name: p.part_item?.name || 'Товар'
+                                });
+                            }
+                        }
+                    }
+                    
+                    if (!data.cursor || data.cursor === '') break;
+                    cursor = data.cursor;
+                    page++;
+                    await sleep(300);
+                }
+                
+                if (products.length === 0) {
+                    throw new Error('Нет товаров!');
+                }
+                
+                logStock(`✓ Товаров: ${products.length}`);
+                notify(2, 3, 'Товары ✓', `${products.length} товаров`, 'success');
+                await sleep(1000);
+                
+                // ШАГ 3: Установить остатки
+                if (this.shouldStop) throw new Error('Остановлено');
+                logStock('Шаг 3/3: Установка остатков...');
+                notify(3, 3, 'Остатки', 'Устанавливаем...');
+                
+                let updated = 0;
+                let errors = 0;
+                
+                // Батчами по 50 товаров
+                const batchSize = 50;
+                for (let i = 0; i < products.length; i += batchSize) {
+                    if (this.shouldStop) throw new Error('Остановлено');
+                    
+                    const batch = products.slice(i, i + batchSize);
+                    const stocks = batch.map(p => ({
+                        offer_id: p.offer_id,
+                        stock: Math.floor(Math.random() * (maxStock - minStock + 1)) + minStock,
+                        warehouse_id: warehouse.warehouse_id
+                    }));
+                    
+                    try {
+                        const result = await apiRequest(API.STOCK_BATCH_SET, {
+                            method: 'POST',
+                            body: JSON.stringify({
+                                company_id: parseInt(COMPANY_ID),
+                                stocks: stocks
+                            })
+                        });
+                        
+                        const successCount = (result.status || []).filter(s => s.updated).length;
+                        updated += successCount;
+                        errors += batch.length - successCount;
+                        
+                        logStock(`Батч ${Math.ceil((i + 1) / batchSize)}: ${successCount}/${batch.length} обновлено`);
+                    } catch (e) {
+                        errors += batch.length;
+                        logStock(`❌ Ошибка батча: ${e.message}`);
+                    }
+                    
+                    await sleep(500);
+                }
+                
+                logStock('════════════════════════════════════');
+                logStock(`🎉 ГОТОВО! Обновлено: ${updated}, Ошибок: ${errors}`);
+                logStock('════════════════════════════════════');
+                
+                notify(3, 3, 'ГОТОВО! 🎉', `${updated} товаров обновлено`, 'success');
+                showToast(`✅ Остатки: ${updated} товаров`, 'success');
+                
+            } catch (error) {
+                logStock(`❌ Ошибка: ${error.message}`);
+                notify(0, 3, 'ОШИБКА ❌', error.message.substring(0, 60), 'error');
+                showToast(`Ошибка: ${error.message.substring(0, 40)}`, 'error');
+            } finally {
+                this.isRunning = false;
+                this.shouldStop = false;
+                updateButtons();
+            }
+        }
+    };
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // GUI
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -2134,6 +2318,8 @@ if __name__ == "__main__":
         const btnStopWarehouse = widgetRef.querySelector('#btn-stop-warehouse');
         const btnPriceChanger = widgetRef.querySelector('#btn-run-price-changer');
         const btnStopPriceChanger = widgetRef.querySelector('#btn-stop-price-changer');
+        const btnStock = widgetRef.querySelector('#btn-run-stock');
+        const btnStopStock = widgetRef.querySelector('#btn-stop-stock');
         
         if (btnProducts && btnStopProducts) {
             btnProducts.style.display = ProductsModule.isRunning ? 'none' : 'block';
@@ -2148,6 +2334,11 @@ if __name__ == "__main__":
         if (btnPriceChanger && btnStopPriceChanger) {
             btnPriceChanger.style.display = PriceChangerModule.isRunning ? 'none' : 'block';
             btnStopPriceChanger.style.display = PriceChangerModule.isRunning ? 'block' : 'none';
+        }
+        
+        if (btnStock && btnStopStock) {
+            btnStock.style.display = StockModule.isRunning ? 'none' : 'block';
+            btnStopStock.style.display = StockModule.isRunning ? 'block' : 'none';
         }
     }
 
@@ -2352,6 +2543,7 @@ if __name__ == "__main__":
                     <button class="tab active" data-tab="products">Товары</button>
                     <button class="tab" data-tab="warehouse">Склад</button>
                     <button class="tab" data-tab="prices">Цены</button>
+                    <button class="tab" data-tab="stock">Остатки</button>
                     <button class="tab" data-tab="sku">SKU</button>
                     <button class="tab" data-tab="promotion">Реклама</button>
                     <button class="tab" data-tab="interceptor">API</button>
@@ -2487,6 +2679,29 @@ if __name__ == "__main__":
                     <button class="btn btn-primary" id="btn-run-price-changer">Изменить цены</button>
                     <button class="btn btn-danger" id="btn-stop-price-changer" style="display:none">СТОП</button>
                     <div class="hint" style="margin-top:8px">Логи в консоли браузера (F12)</div>
+                </div>
+                
+                <!-- ОСТАТКИ -->
+                <div class="tab-content" id="tab-stock">
+                    <div style="background:#fff3cd;padding:10px;border-radius:6px;margin-bottom:12px;font-size:11px;color:#856404">
+                        📦 Установит случайные остатки для ВСЕХ товаров на первом RFBS складе
+                    </div>
+                    
+                    <div class="row">
+                        <div class="field">
+                            <label>Мин. остаток</label>
+                            <input type="number" id="cfg-minStock" value="${config.stock.minStock}" min="1" max="1000">
+                        </div>
+                        <div class="field">
+                            <label>Макс. остаток</label>
+                            <input type="number" id="cfg-maxStock" value="${config.stock.maxStock}" min="1" max="1000">
+                        </div>
+                    </div>
+                    
+                    <button class="btn btn-primary" id="btn-run-stock">🚀 Установить остатки</button>
+                    <button class="btn btn-danger" id="btn-stop-stock" style="display:none">СТОП</button>
+                    
+                    <div class="hint" style="margin-top:8px">Каждый товар получит случайное значение в указанном диапазоне</div>
                 </div>
                 
                 <!-- SKU -->
@@ -2655,6 +2870,21 @@ if __name__ == "__main__":
             PriceChangerModule.stop();
         });
 
+        // Кнопки остатков
+        widget.querySelector('#btn-run-stock').addEventListener('click', () => {
+            const cfg = {
+                stock: {
+                    minStock: parseInt(widget.querySelector('#cfg-minStock').value) || 10,
+                    maxStock: parseInt(widget.querySelector('#cfg-maxStock').value) || 50
+                }
+            };
+            StockModule.run(cfg);
+        });
+        
+        widget.querySelector('#btn-stop-stock').addEventListener('click', () => {
+            StockModule.stop();
+        });
+
         // Кнопки SKU
         widget.querySelector('#btn-load-sku').addEventListener('click', () => {
             SKUModule.run();
@@ -2802,6 +3032,7 @@ if __name__ == "__main__":
         ProductsModule,
         WarehouseModule,
         PriceChangerModule,
+        StockModule,
         SKUModule,
         PromotionModule,
         NotificationSystem,
