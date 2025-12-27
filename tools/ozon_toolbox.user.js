@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ozon Seller Toolbox
 // @namespace    http://tampermonkey.net/
-// @version      4.7
+// @version      4.11
 // @description  Полный набор: товары + склады (API v3) + цены + SKU + реклама + перехватчик
 // @author       You
 // @match        https://seller.ozon.ru/*
@@ -1012,7 +1012,18 @@ if __name__ == "__main__":
             throw new Error(`HTTP ${response.status}: ${errorText.substring(0, 100)}`);
         }
         
-        return response.json();
+        // Обработка пустых ответов (204 No Content или пустое тело)
+        const text = await response.text();
+        if (!text || text.trim() === '') {
+            return { success: true };
+        }
+        
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            // Если не JSON, возвращаем как есть
+            return { success: true, raw: text };
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
