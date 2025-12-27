@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ozon Seller Toolbox
 // @namespace    http://tampermonkey.net/
-// @version      4.0
+// @version      4.1
 // @description  Полный набор: товары + склады (API v3) + цены + SKU + реклама + перехватчик
 // @author       You
 // @match        https://seller.ozon.ru/*
@@ -803,7 +803,10 @@ if __name__ == "__main__":
             workingDays: [1,2,3,4,5,6,7],
             workingHoursFrom: "08:00",
             workingHoursTo: "22:00",
-            speedMode: "human"
+            speedMode: "human",
+            // Ручные координаты (если геокодер не работает)
+            manualLat: "",
+            manualLng: ""
         },
         priceChanger: {
             minThreshold: 100,     // Минимальная цена для изменения (если больше - меняем)
@@ -1241,8 +1244,8 @@ if __name__ == "__main__":
                 const encodedAddress = encodeURIComponent(warehouseAddress.trim());
                 let geoData;
                 
+                // Метод 1: Ozon API (может не работать)
                 try {
-                    // Ozon API
                     geoData = await apiRequest(`${API.GEO_SUGGEST}?query=${encodedAddress}&country=RU&limit=1`, { method: 'GET' });
                     
                     if (geoData.suggestions?.length > 0) {
@@ -1255,33 +1258,53 @@ if __name__ == "__main__":
                                 city: s.data?.city || s.data?.settlement || '',
                                 zipcode: s.data?.postal_code || ''
                             };
+                            logWh('✓ Координаты получены через Ozon API');
                         }
                     }
                 } catch (e) {
-                    logWh('Ozon API не сработал, пробуем OSM...');
+                    logWh('Ozon API недоступен, пробуем Яндекс...');
                 }
                 
-                // Fallback на OpenStreetMap
+                // Метод 2: Яндекс Геокодер (разрешён в CSP Ozon)
                 if (!this.state.lat) {
-                    const osmResponse = await fetch(
-                        `https://nominatim.openstreetmap.org/search?format=json&q=${encodedAddress}&limit=1&addressdetails=1`,
-                        { headers: { 'User-Agent': 'OzonSellerToolbox/3.9' } }
-                    );
-                    const osmData = await osmResponse.json();
-                    
-                    if (osmData?.length > 0) {
-                        this.state.lat = parseFloat(osmData[0].lat);
-                        this.state.lng = parseFloat(osmData[0].lon);
-                        this.state.parsedAddress = {
-                            country: osmData[0].address?.country || 'Россия',
-                            city: osmData[0].address?.city || osmData[0].address?.town || '',
-                            zipcode: osmData[0].address?.postcode || ''
-                        };
+                    try {
+                        const yandexUrl = `https://geocode-maps.yandex.ru/1.x/?format=json&geocode=${encodedAddress}&results=1`;
+                        const yandexResponse = await fetch(yandexUrl);
+                        const yandexData = await yandexResponse.json();
+                        
+                        const geoObject = yandexData?.response?.GeoObjectCollection?.featureMember?.[0]?.GeoObject;
+                        if (geoObject) {
+                            const pos = geoObject.Point?.pos?.split(' ');
+                            if (pos?.length === 2) {
+                                this.state.lng = parseFloat(pos[0]);
+                                this.state.lat = parseFloat(pos[1]);
+                                
+                                // Парсим адресные компоненты
+                                const components = geoObject.metaDataProperty?.GeocoderMetaData?.Address?.Components || [];
+                                this.state.parsedAddress = {
+                                    country: components.find(c => c.kind === 'country')?.name || 'Россия',
+                                    city: components.find(c => c.kind === 'locality')?.name || 
+                                          components.find(c => c.kind === 'area')?.name || '',
+                                    zipcode: ''
+                                };
+                                logWh('✓ Координаты получены через Яндекс Геокодер');
+                            }
+                        }
+                    } catch (e) {
+                        logWh('Яндекс Геокодер недоступен: ' + e.message);
                     }
                 }
                 
+                // Метод 3: Ручной ввод координат (если есть в config)
+                if (!this.state.lat && config.warehouse.manualLat && config.warehouse.manualLng) {
+                    this.state.lat = parseFloat(config.warehouse.manualLat);
+                    this.state.lng = parseFloat(config.warehouse.manualLng);
+                    this.state.parsedAddress = { country: 'Россия', city: '', zipcode: '' };
+                    logWh('✓ Используются ручные координаты');
+                }
+                
                 if (!this.state.lat || !this.state.lng) {
-                    throw new Error('Не удалось определить координаты. Проверьте адрес.');
+                    throw new Error('Не удалось определить координаты. Проверьте адрес или укажите координаты вручную.');
                 }
                 
                 logWh(`✓ Координаты: ${this.state.lat.toFixed(5)}, ${this.state.lng.toFixed(5)}`);
@@ -2223,6 +2246,22 @@ if __name__ == "__main__":
                         </select>
                     </div>
                     
+                    <div style="background:#e7f3ff;padding:10px;border-radius:6px;margin:10px 0;font-size:11px;color:#0066cc">
+                        ℹ️ Координаты (опционально, если геокодер не работает):<br>
+                        Найти на <a href="https://yandex.ru/maps" target="_blank" style="color:#0066cc">Яндекс.Картах</a> → ПКМ → "Что здесь?"
+                    </div>
+                    
+                    <div class="row">
+                        <div class="field">
+                            <label>Широта (lat)</label>
+                            <input type="text" id="cfg-manualLat" value="${config.warehouse.manualLat || ''}" placeholder="59.37723">
+                        </div>
+                        <div class="field">
+                            <label>Долгота (lng)</label>
+                            <input type="text" id="cfg-manualLng" value="${config.warehouse.manualLng || ''}" placeholder="28.21234">
+                        </div>
+                    </div>
+                    
                     <button class="btn btn-success" id="btn-run-warehouse">Создать склад</button>
                     <button class="btn btn-danger" id="btn-stop-warehouse" style="display:none">СТОП</button>
                     <div class="hint" style="margin-top:8px">Логи в консоли браузера (F12)</div>
@@ -2397,7 +2436,9 @@ if __name__ == "__main__":
                     workingHoursFrom: widget.querySelector('#cfg-workFrom').value || '09:00',
                     workingHoursTo: widget.querySelector('#cfg-workTo').value || '21:00',
                     workingDays: [1,2,3,4,5,6,7],
-                    speedMode: widget.querySelector('#cfg-speedMode').value
+                    speedMode: widget.querySelector('#cfg-speedMode').value,
+                    manualLat: widget.querySelector('#cfg-manualLat').value.trim(),
+                    manualLng: widget.querySelector('#cfg-manualLng').value.trim()
                 }
             };
             saveConfig(cfg);
@@ -2605,8 +2646,8 @@ if __name__ == "__main__":
         }
     };
 
-    console.log('Ozon Toolbox v4.0 loaded');
+    console.log('Ozon Toolbox v4.1 loaded');
     console.log(`Company ID: ${COMPANY_ID || 'не найден'}`);
-    console.log('Склады: API v3 | Экспорт сессии: window.OzonToolbox.session');
+    console.log('Склады: API v3 + Яндекс Геокодер | Экспорт сессии: window.OzonToolbox.session');
 
 })();
