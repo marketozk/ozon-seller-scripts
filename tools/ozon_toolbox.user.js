@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ozon Seller Toolbox
 // @namespace    http://tampermonkey.net/
-// @version      4.3
+// @version      4.4
 // @description  Полный набор: товары + склады (API v3) + цены + SKU + реклама + перехватчик
 // @author       You
 // @match        https://seller.ozon.ru/*
@@ -1294,10 +1294,22 @@ if __name__ == "__main__":
                             }
                         }
                         
-                        // Формат 2: { suggestions: [{ geo: { lat, lon } }] } (старый формат)
+                        // Формат 2: { suggestions: [{ address: { geometry: { point: { lat, lon } } } }] } (актуальный формат!)
                         if (!this.state.lat && geoData.suggestions?.length > 0) {
                             const s = geoData.suggestions[0];
-                            if (s.geo) {
+                            const point = s.address?.geometry?.point;
+                            if (point?.lat && point?.lon) {
+                                this.state.lat = point.lat;
+                                this.state.lng = point.lon;
+                                this.state.parsedAddress = {
+                                    country: 'Россия',
+                                    city: s.address?.locality || s.address?.region || '',
+                                    zipcode: s.address?.postalCode || ''
+                                };
+                                this.state.locationUid = s.uid || generateUUID();
+                                logWh('✓ Координаты получены через Ozon GeoProxy (формат suggestions)');
+                            } else if (s.geo) {
+                                // Старый формат с geo
                                 this.state.lat = s.geo.lat;
                                 this.state.lng = s.geo.lon || s.geo.lng;
                                 this.state.parsedAddress = {
@@ -1305,7 +1317,7 @@ if __name__ == "__main__":
                                     city: s.data?.city || s.data?.settlement || '',
                                     zipcode: s.data?.postal_code || ''
                                 };
-                                logWh('✓ Координаты получены через Ozon GeoProxy (формат suggestions)');
+                                logWh('✓ Координаты получены через Ozon GeoProxy (формат geo)');
                             }
                         }
                         
@@ -1470,6 +1482,7 @@ if __name__ == "__main__":
                 const areaData = await apiRequest(API.DELIVERY_AREA_CREATE, {
                     method: 'POST',
                     body: JSON.stringify({
+                        company_id: companyId,
                         area: {
                             delivery_method_id: this.state.methodId,
                             delivery_time: String(deliveryTimeMinutes),
