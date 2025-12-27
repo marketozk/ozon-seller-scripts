@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ozon Seller Interceptor
 // @namespace    http://tampermonkey.net/
-// @version      2.1
+// @version      2.2
 // @description  Полный перехватчик API запросов для seller.ozon.ru (заголовки, куки, тело, ответ)
 // @author       You
 // @match        https://seller.ozon.ru/*
@@ -20,14 +20,40 @@
         localStorage.setItem('_interceptedRequests', JSON.stringify(capturedRequests));
     }
 
-    // Функция получения всех куки
+    // Функция получения всех куки (корректно обрабатывает = в значении)
     function getCookies() {
         const cookies = {};
         document.cookie.split(';').forEach(c => {
-            const [name, value] = c.trim().split('=');
-            if (name) cookies[name] = value;
+            const idx = c.indexOf('=');
+            if (idx > 0) {
+                const name = c.substring(0, idx).trim();
+                const value = c.substring(idx + 1).trim();
+                cookies[name] = value;
+            }
         });
         return cookies;
+    }
+
+    // Парсинг строки заголовков XHR в объект
+    function parseHeadersString(headersStr) {
+        const headers = {};
+        if (!headersStr) return headers;
+        headersStr.split('\r\n').forEach(line => {
+            const idx = line.indexOf(':');
+            if (idx > 0) {
+                const name = line.substring(0, idx).trim().toLowerCase();
+                const value = line.substring(idx + 1).trim();
+                headers[name] = value;
+            }
+        });
+        return headers;
+    }
+
+    // Куки сохраняем один раз при старте сессии
+    let sessionCookies = null;
+    function getSessionCookies() {
+        if (!sessionCookies) sessionCookies = getCookies();
+        return sessionCookies;
     }
 
     // Сохраняем оригинальный fetch
@@ -47,9 +73,8 @@
             type: 'fetch',
             url: url,
             method: options.method || 'GET',
-            headers: options.headers ? {...options.headers} : {},
+            requestHeaders: options.headers ? {...options.headers} : {},
             credentials: options.credentials || 'same-origin',
-            cookies: getCookies(),
             body: options.body ? tryParseJSON(options.body) : null
         };
 
@@ -119,7 +144,6 @@
             url: xhr._interceptedUrl,
             method: xhr._interceptedMethod,
             requestHeaders: xhr._interceptedHeaders || {},
-            cookies: getCookies(),
             body: tryParseJSON(body)
         };
 
@@ -132,7 +156,7 @@
                 request.response = 'не JSON';
             }
             request.status = xhr.status;
-            request.responseHeaders = xhr.getAllResponseHeaders();
+            request.responseHeaders = parseHeadersString(xhr.getAllResponseHeaders());
             capturedRequests.push(request);
             saveRequests();
         });
@@ -225,7 +249,7 @@
             console.log('Method:', r.method);
             console.log('Type:', r.type);
             console.log('Status:', r.status);
-            console.log('Headers:', r.headers || r.requestHeaders);
+            console.log('Request Headers:', r.requestHeaders);
             console.log('Body:', r.body);
             console.log('Response:', r.response);
         });
@@ -246,8 +270,15 @@
         return last;
     };
 
+    // Функция для получения куки (вызывать вручную при необходимости)
+    window.showCookies = function() {
+        const cookies = getCookies();
+        console.log('🍪 Cookies:', cookies);
+        return cookies;
+    };
+
     // Уведомление при загрузке
-    console.log('%c🔍 Ozon Interceptor v2.1 активен', 'color: #00f; font-weight: bold; font-size: 14px;');
+    console.log('%c🔍 Ozon Interceptor v2.2 активен', 'color: #00f; font-weight: bold; font-size: 14px;');
     console.log(`📦 Сохранено запросов: ${capturedRequests.length}`);
     console.log('Команды: showRequests() | copyRequests() | downloadRequests() | clearRequests()');
     console.log('         findCompanyId() | findRequests("url") | lastRequest("url")');
