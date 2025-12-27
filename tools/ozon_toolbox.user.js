@@ -1536,9 +1536,7 @@ if __name__ == "__main__":
                 logWh('Шаг 3/8: Создание метода доставки...');
                 notify(3, 8, 'Метод доставки', 'Создаём Express метод...');
                 
-                // Уникальный суффикс для избежания конфликта имён
-                const uniqueSuffix = Date.now().toString(36).slice(-4).toUpperCase();
-                const methodName = `Экспресс. Самостоятельно. ${autoName} ${uniqueSuffix}`;
+                const methodName = `Экспресс. Самостоятельно. ${autoName}`;
                 
                 const methodBody = {
                     company_id: companyId,
