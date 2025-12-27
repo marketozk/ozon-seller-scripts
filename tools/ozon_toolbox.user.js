@@ -1055,6 +1055,13 @@ if __name__ == "__main__":
             log(`Поиск: "${searchQuery}"`);
             log(`Company ID: ${COMPANY_ID}`);
             
+            NotificationSystem.show({
+                title: '🔍 Поиск товаров',
+                message: `Запрос: "${searchQuery.substring(0, 30)}..."`,
+                type: 'info',
+                duration: 4000
+            });
+            
             try {
                 let allItems = [];
                 let lastId = null;
@@ -1091,6 +1098,13 @@ if __name__ == "__main__":
                 
                 log(`Найдено: ${allItems.length} товаров`);
                 
+                NotificationSystem.show({
+                    title: '📦 Найдено товаров',
+                    message: `${allItems.length} шт., доступно для добавления...`,
+                    type: 'info',
+                    duration: 3000
+                });
+                
                 const availableItems = allItems.filter(item => 
                     !item.attributes?.find(attr => attr.key === "12085" && attr.value === "deny")
                 );
@@ -1110,6 +1124,13 @@ if __name__ == "__main__":
                 }
                 
                 log(`Добавление ${selectedItems.length} товаров...`);
+                
+                NotificationSystem.show({
+                    title: '➕ Добавление',
+                    message: `Добавляем ${selectedItems.length} товаров по ${price} руб...`,
+                    type: 'info',
+                    duration: 4000
+                });
                 
                 let addedCount = 0;
                 let errorCount = 0;
@@ -1151,10 +1172,41 @@ if __name__ == "__main__":
                 }
                 
                 log(`--- ИТОГО: +${addedCount} / ошибок: ${errorCount}`);
+                
+                // Финальное уведомление
+                if (addedCount > 0 && errorCount === 0) {
+                    NotificationSystem.show({
+                        title: '✅ Готово!',
+                        message: `Добавлено ${addedCount} товаров`,
+                        type: 'success',
+                        duration: 6000
+                    });
+                } else if (addedCount > 0) {
+                    NotificationSystem.show({
+                        title: '⚠️ Завершено',
+                        message: `Добавлено: ${addedCount}, ошибок: ${errorCount}`,
+                        type: 'warning',
+                        duration: 6000
+                    });
+                } else {
+                    NotificationSystem.show({
+                        title: '❌ Ошибка',
+                        message: `Не удалось добавить товары`,
+                        type: 'error',
+                        duration: 8000
+                    });
+                }
+                
                 showToast(`Добавлено ${addedCount} товаров`, addedCount > 0 ? 'success' : 'error');
                 
             } catch (error) {
                 log(`Ошибка: ${error.message}`);
+                NotificationSystem.show({
+                    title: '❌ Ошибка',
+                    message: error.message.substring(0, 60),
+                    type: 'error',
+                    duration: 8000
+                });
                 showToast('Ошибка выполнения', 'error');
             } finally {
                 this.isRunning = false;
