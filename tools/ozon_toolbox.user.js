@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Ozon Seller Toolbox
 // @namespace    http://tampermonkey.net/
-// @version      4.1
+// @version      4.2
 // @description  Полный набор: товары + склады (API v3) + цены + SKU + реклама + перехватчик
 // @author       You
 // @match        https://seller.ozon.ru/*
@@ -771,7 +771,9 @@ if __name__ == "__main__":
         PRICE_BATCH_SET: 'https://seller.ozon.ru/api/seller-price-api/v1/price-batch-set',
         
         // Склад Express (актуальные v3)
-        GEO_SUGGEST: '/api/site/address-service/v2/suggest',
+        // ВАЖНО: geoproxy.ozon.ru - правильный эндпоинт геокодирования Ozon
+        GEO_SUGGEST: 'https://geoproxy.ozon.ru/Suggest',
+        GEO_PROVIDERS: 'https://geoproxy.ozon.ru/GeoProvidersV2',
         WAREHOUSE_DRAFT_CREATE: '/api/site/logistic-service/v3/warehouse/draft/create',
         DELIVERY_METHOD_CREATE: '/api/delivery-method-service/delivery-method/create',
         DELIVERY_METHOD_ACTIVATE: '/api/delivery-method-service/delivery-method/activate',
@@ -1244,25 +1246,53 @@ if __name__ == "__main__":
                 const encodedAddress = encodeURIComponent(warehouseAddress.trim());
                 let geoData;
                 
-                // Метод 1: Ozon API (может не работать)
+                // Генерация requestSessionId для API Ozon
+                const generateUUID = () => {
+                    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                        const r = Math.random() * 16 | 0;
+                        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                        return v.toString(16);
+                    });
+                };
+                
+                // Метод 1: Ozon GeoProxy API (правильный эндпоинт!)
                 try {
-                    geoData = await apiRequest(`${API.GEO_SUGGEST}?query=${encodedAddress}&country=RU&limit=1`, { method: 'GET' });
+                    const requestSessionId = generateUUID();
+                    const geoUrl = `${API.GEO_SUGGEST}?clientName=seller-ui-warehouse&query=${encodedAddress}&count=50&lang=ru&contextLocationUID=&removeDisallowedCountries=true&requestSessionId=${requestSessionId}`;
                     
-                    if (geoData.suggestions?.length > 0) {
-                        const s = geoData.suggestions[0];
-                        if (s.geo) {
-                            this.state.lat = s.geo.lat;
-                            this.state.lng = s.geo.lon;
-                            this.state.parsedAddress = {
-                                country: s.data?.country || 'Россия',
-                                city: s.data?.city || s.data?.settlement || '',
-                                zipcode: s.data?.postal_code || ''
-                            };
-                            logWh('✓ Координаты получены через Ozon API');
+                    logWh('Пробуем Ozon GeoProxy API...');
+                    const response = await fetch(geoUrl, {
+                        method: 'GET',
+                        credentials: 'include',
+                        headers: {
+                            'Accept': 'application/json',
+                            'Accept-Language': 'ru-RU,ru;q=0.9'
                         }
+                    });
+                    
+                    if (response.ok) {
+                        geoData = await response.json();
+                        
+                        // Ожидаемый формат ответа: { results: [{ center: { lat, lon }, address: {...} }] }
+                        if (geoData.results?.length > 0) {
+                            const firstResult = geoData.results[0];
+                            if (firstResult.center) {
+                                this.state.lat = firstResult.center.lat;
+                                this.state.lng = firstResult.center.lon;
+                                this.state.parsedAddress = {
+                                    country: firstResult.address?.country || 'Россия',
+                                    city: firstResult.address?.locality || firstResult.address?.region || '',
+                                    zipcode: firstResult.address?.postalCode || ''
+                                };
+                                this.state.locationUid = firstResult.uid || generateUUID();
+                                logWh('✓ Координаты получены через Ozon GeoProxy API');
+                            }
+                        }
+                    } else {
+                        logWh(`Ozon GeoProxy: HTTP ${response.status}`);
                     }
                 } catch (e) {
-                    logWh('Ozon API недоступен, пробуем Яндекс...');
+                    logWh('Ozon GeoProxy API недоступен: ' + e.message);
                 }
                 
                 // Метод 2: Яндекс Геокодер (разрешён в CSP Ozon)
