@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Ozon Seller Interceptor
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  Перехватчик API запросов для seller.ozon.ru
+// @version      2.1
+// @description  Полный перехватчик API запросов для seller.ozon.ru (заголовки, куки, тело, ответ)
 // @author       You
 // @match        https://seller.ozon.ru/*
 // @grant        none
@@ -20,6 +20,16 @@
         localStorage.setItem('_interceptedRequests', JSON.stringify(capturedRequests));
     }
 
+    // Функция получения всех куки
+    function getCookies() {
+        const cookies = {};
+        document.cookie.split(';').forEach(c => {
+            const [name, value] = c.trim().split('=');
+            if (name) cookies[name] = value;
+        });
+        return cookies;
+    }
+
     // Сохраняем оригинальный fetch
     const originalFetch = window.fetch;
 
@@ -28,50 +38,78 @@
         const [url, options = {}] = args;
 
         // Фильтруем только API запросы
-        if (!url.includes('/api/')) {
+        if (!url.includes('/api/') && !url.includes('geoproxy')) {
             return originalFetch.apply(this, args);
         }
 
         const request = {
             timestamp: new Date().toISOString(),
+            type: 'fetch',
             url: url,
             method: options.method || 'GET',
+            headers: options.headers ? {...options.headers} : {},
+            credentials: options.credentials || 'same-origin',
+            cookies: getCookies(),
             body: options.body ? tryParseJSON(options.body) : null
         };
 
         console.log(`🔵 [Interceptor] ${request.method} ${url}`);
 
-        const response = await originalFetch.apply(this, args);
-        const clone = response.clone();
-
         try {
-            request.response = await clone.json();
-        } catch (e) {
-            request.response = null;
+            const response = await originalFetch.apply(this, args);
+            const clone = response.clone();
+
+            // Собираем заголовки ответа
+            const responseHeaders = {};
+            response.headers.forEach((value, key) => {
+                responseHeaders[key] = value;
+            });
+
+            try {
+                request.response = await clone.json();
+            } catch (e) {
+                request.response = 'не JSON';
+            }
+
+            request.status = response.status;
+            request.responseHeaders = responseHeaders;
+            capturedRequests.push(request);
+            saveRequests();
+
+            return response;
+        } catch (error) {
+            request.error = error.message;
+            request.status = 0;
+            capturedRequests.push(request);
+            saveRequests();
+            throw error;
         }
-
-        request.status = response.status;
-        capturedRequests.push(request);
-        saveRequests();
-
-        return response;
     };
 
     // Перехватываем XMLHttpRequest
     const originalXHROpen = XMLHttpRequest.prototype.open;
     const originalXHRSend = XMLHttpRequest.prototype.send;
+    const originalXHRSetHeader = XMLHttpRequest.prototype.setRequestHeader;
 
     XMLHttpRequest.prototype.open = function(method, url) {
         this._interceptedMethod = method;
         this._interceptedUrl = url;
+        this._interceptedHeaders = {};
         return originalXHROpen.apply(this, arguments);
+    };
+
+    XMLHttpRequest.prototype.setRequestHeader = function(name, value) {
+        if (this._interceptedHeaders) {
+            this._interceptedHeaders[name] = value;
+        }
+        return originalXHRSetHeader.apply(this, arguments);
     };
 
     XMLHttpRequest.prototype.send = function(body) {
         const xhr = this;
 
         // Фильтруем только API запросы
-        if (!xhr._interceptedUrl.includes('/api/')) {
+        if (!xhr._interceptedUrl.includes('/api/') && !xhr._interceptedUrl.includes('geoproxy')) {
             return originalXHRSend.apply(this, arguments);
         }
 
@@ -80,6 +118,8 @@
             type: 'XHR',
             url: xhr._interceptedUrl,
             method: xhr._interceptedMethod,
+            requestHeaders: xhr._interceptedHeaders || {},
+            cookies: getCookies(),
             body: tryParseJSON(body)
         };
 
@@ -89,9 +129,17 @@
             try {
                 request.response = JSON.parse(xhr.responseText);
             } catch (e) {
-                request.response = null;
+                request.response = 'не JSON';
             }
             request.status = xhr.status;
+            request.responseHeaders = xhr.getAllResponseHeaders();
+            capturedRequests.push(request);
+            saveRequests();
+        });
+
+        xhr.addEventListener('error', function() {
+            request.error = 'Network error';
+            request.status = 0;
             capturedRequests.push(request);
             saveRequests();
         });
@@ -166,9 +214,42 @@
         return null;
     };
 
+    // Поиск запросов по URL
+    window.findRequests = function(urlPattern) {
+        const requests = JSON.parse(localStorage.getItem('_interceptedRequests') || '[]');
+        const found = requests.filter(r => r.url.includes(urlPattern));
+        console.log(`🔍 Найдено ${found.length} запросов по "${urlPattern}":`);
+        found.forEach((r, i) => {
+            console.log(`\n--- Запрос #${i + 1} ---`);
+            console.log('URL:', r.url);
+            console.log('Method:', r.method);
+            console.log('Type:', r.type);
+            console.log('Status:', r.status);
+            console.log('Headers:', r.headers || r.requestHeaders);
+            console.log('Body:', r.body);
+            console.log('Response:', r.response);
+        });
+        return found;
+    };
+
+    // Детальный вывод последнего запроса к URL
+    window.lastRequest = function(urlPattern) {
+        const requests = JSON.parse(localStorage.getItem('_interceptedRequests') || '[]');
+        const found = requests.filter(r => r.url.includes(urlPattern));
+        if (found.length === 0) {
+            console.log(`❌ Запросы к "${urlPattern}" не найдены`);
+            return null;
+        }
+        const last = found[found.length - 1];
+        console.log('📋 Последний запрос к', urlPattern);
+        console.log(JSON.stringify(last, null, 2));
+        return last;
+    };
+
     // Уведомление при загрузке
-    console.log('%c🔍 Ozon Interceptor активен', 'color: #00f; font-weight: bold; font-size: 14px;');
+    console.log('%c🔍 Ozon Interceptor v2.1 активен', 'color: #00f; font-weight: bold; font-size: 14px;');
     console.log(`📦 Сохранено запросов: ${capturedRequests.length}`);
-    console.log('Команды: showRequests() | copyRequests() | downloadRequests() | clearRequests() | findCompanyId()');
+    console.log('Команды: showRequests() | copyRequests() | downloadRequests() | clearRequests()');
+    console.log('         findCompanyId() | findRequests("url") | lastRequest("url")');
 
 })();
